@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "description": "Guitar Pro-style tab player with Songsterr import, built on alphaTab",
   "scripts": {
-    "test": "node test/convert.test.mjs && node test/e2e.test.mjs",
+    "test": "node --test test/unit.test.mjs && node test/convert.test.mjs && node test/e2e.test.mjs",
     "start": "node server.js",
+    "test:unit": "node --test test/unit.test.mjs",
     "test:convert": "node test/convert.test.mjs",
     "test:e2e": "node test/e2e.test.mjs"
   },

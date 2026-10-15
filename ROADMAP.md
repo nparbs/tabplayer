@@ -2,7 +2,7 @@
 
 The goal is to get as close to Guitar Pro as practical in a browser app. Status: ✅ done · 🚧 partial · ⬜ planned
 
-## v0.1: Viewer and player (current)
+## v0.1: Viewer and player
 
 - ✅ Songsterr URL / id import (all tracks, selected track from URL)
 - ✅ Open GP3–GP8, GPX, MusicXML, Capella, alphaTex
@@ -14,16 +14,21 @@ The goal is to get as close to Guitar Pro as practical in a browser app. Status:
 - ✅ Keyboard shortcuts
 - ✅ Converter + browser test suites
 
-## v0.2: Import fidelity
+## v0.2: Import fidelity, YouTube audio, themes (current)
 
-- ⬜ Repeats and alternate endings from Songsterr (if present in the data; currently mapped defensively)
-- ⬜ Mid-song instrument changes (`trackSoundAutomations`)
-- ⬜ Tremolo picking, sustain pedal, up-strokes
-- ⬜ Capo and alternate-tuning names
-- ⬜ Bass displayed an octave up (standard bass notation)
-- ⬜ Drum articulation mapping verified against Songsterr's drum kit
-- ⬜ Pick an older Songsterr revision
-- ⬜ Better error messages for restricted or removed songs
+- ✅ Repeats from Songsterr (`repeatStart` / `repeat` on any track; verified against video sync points)
+- 🚧 Alternate endings: mapped if present, but no Songsterr song using them has been found to verify
+- ✅ Mid-song instrument changes (`trackSoundAutomations` → program changes)
+- ✅ Tremolo picking, sustain pedal, up/down strokes and arpeggios (plus tap/slap/pop, trills, triplet feel, fermatas)
+- ✅ Capo (applied to playback and fretboard) and alternate-tuning names
+- ✅ Guitar and bass displayed an octave up (standard notation for fretted instruments)
+- ✅ Drum articulation mapping verified: Songsterr uses Guitar Pro 7 articulation ids (e.g. 91 rim shot, 92 half-open hi-hat, 93 ride edge)
+- ✅ Pick an older Songsterr revision
+- ✅ Better error messages for restricted, rejected or removed songs
+- ✅ Play the original recording from YouTube in sync with the tab (Songsterr video sync points), with sync offset nudge
+- ✅ Themes: light, dark (dark score paper), midnight, sepia, high contrast, follow system
+- ✅ Song search (Songsterr catalogue) with keyboard navigation and open-on-instrument buttons
+- ✅ UI: welcome screen with sample songs, bar/section readout, ←/→ bar navigation, collapsible sidebar, phone layout
 
 ## v0.3: Practice tools (Guitar Pro "Speed Trainer" and more)
 
@@ -55,7 +60,8 @@ Guitar Pro is an editor. alphaTab is a renderer/player, so editing needs our own
 - ⬜ Desktop app (Electron or Tauri) with native file associations for `.gp*`
 - ⬜ Installable PWA with offline cache of opened songs
 - ⬜ Better soundfont option (larger GM bank, downloadable)
-- ⬜ CI: run converter and e2e tests on GitHub Actions
+- ⬜ CI: run unit, converter and e2e tests on GitHub Actions
+- ⬜ YouTube audio for files opened locally (custom video URL + manual sync)
 
 ## Known limitations
 
