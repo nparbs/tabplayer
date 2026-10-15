@@ -164,6 +164,10 @@ body.no-fretboard .resizer-y { display: none; }
 }
 .swatch.auto { background: conic-gradient(#f0a030, #3fa7ff, #b48cff, #7cc47f, #f0a030); }
 .swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--text); }
+.small-note { font-size: 11px; margin: 6px 0 0; }
+.track-sound { margin-top: 4px; }
+.track-sound select { width: 100%; font-size: 11px; padding: 1px 4px; }
+.track-sound select.changed { border-color: var(--accent); }
 .small-btn { width: 100%; margin-top: 8px; font-size: 12px; }
 .sidebar h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
 .song-title { font-size: 17px; font-weight: 650; overflow-wrap: anywhere; }
@@ -192,6 +196,7 @@ body.no-fretboard .resizer-y { display: none; }
 .track-controls button.on.mute { background: var(--danger); border-color: var(--danger); color: #fff; }
 .track-controls button.on.solo { background: var(--success); border-color: var(--success); color: #fff; }
 .track-controls input[type=range] { flex: 1; min-width: 0; }
+body.yt-mode .track-sound,
 body.yt-mode .track-controls { opacity: .4; pointer-events: none; }
 
 .score-area { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; }

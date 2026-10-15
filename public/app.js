@@ -15,6 +15,7 @@ const ui = {
   showFretboard: $('show-fretboard'), multiTrack: $('multi-track'),
   overlay: $('overlay'), overlayText: $('overlay-text'), viewport: $('viewport'), welcome: $('welcome'),
   fretboard: $('fretboard'),
+  soundFont: $('soundfont'),
   accentSwatches: $('accent-swatches'), uiScale: $('ui-scale'), density: $('density'), resetAppearance: $('reset-appearance'),
   sidebarResizer: $('sidebar-resizer'), fretResizer: $('fret-resizer'),
   videoPanel: $('video-panel'), videoTitle: $('video-title'), ytHost: $('yt-host'),
@@ -103,6 +104,40 @@ function applyNotation(score, notation) {
 const initialView = loadView();
 showViewControls(initialView);
 
+// ---------- sounds ----------
+// Sonivox ships with alphaTab; the rest are fetched (and cached) by the server on first use.
+const SOUNDFONTS = {
+  sonivox: { name: 'Sonivox', url: abs('/alphatab/soundfont/sonivox.sf2') },
+  generaluser: { name: 'GeneralUser GS', url: abs('/api/soundfont/generaluser') },
+  musescore: { name: 'MuseScore General', url: abs('/api/soundfont/musescore') },
+  fluid: { name: 'FluidR3 Mono', url: abs('/api/soundfont/fluid') },
+};
+const sound = { id: SOUNDFONTS[store.get('soundfont')] ? store.get('soundfont') : 'sonivox', pending: null };
+sound.pending = sound.id;
+
+// General MIDI program names, for the per-track instrument picker.
+const GM_FAMILIES = [
+  ['Piano', 'Acoustic Grand Piano', 'Bright Acoustic Piano', 'Electric Grand Piano', 'Honky-tonk Piano', 'Electric Piano 1', 'Electric Piano 2', 'Harpsichord', 'Clavinet'],
+  ['Chromatic Percussion', 'Celesta', 'Glockenspiel', 'Music Box', 'Vibraphone', 'Marimba', 'Xylophone', 'Tubular Bells', 'Dulcimer'],
+  ['Organ', 'Drawbar Organ', 'Percussive Organ', 'Rock Organ', 'Church Organ', 'Reed Organ', 'Accordion', 'Harmonica', 'Tango Accordion'],
+  ['Guitar', 'Acoustic Guitar (nylon)', 'Acoustic Guitar (steel)', 'Electric Guitar (jazz)', 'Electric Guitar (clean)', 'Electric Guitar (muted)', 'Overdriven Guitar', 'Distortion Guitar', 'Guitar Harmonics'],
+  ['Bass', 'Acoustic Bass', 'Electric Bass (finger)', 'Electric Bass (pick)', 'Fretless Bass', 'Slap Bass 1', 'Slap Bass 2', 'Synth Bass 1', 'Synth Bass 2'],
+  ['Strings', 'Violin', 'Viola', 'Cello', 'Contrabass', 'Tremolo Strings', 'Pizzicato Strings', 'Orchestral Harp', 'Timpani'],
+  ['Ensemble', 'String Ensemble 1', 'String Ensemble 2', 'Synth Strings 1', 'Synth Strings 2', 'Choir Aahs', 'Voice Oohs', 'Synth Voice', 'Orchestra Hit'],
+  ['Brass', 'Trumpet', 'Trombone', 'Tuba', 'Muted Trumpet', 'French Horn', 'Brass Section', 'Synth Brass 1', 'Synth Brass 2'],
+  ['Reed', 'Soprano Sax', 'Alto Sax', 'Tenor Sax', 'Baritone Sax', 'Oboe', 'English Horn', 'Bassoon', 'Clarinet'],
+  ['Pipe', 'Piccolo', 'Flute', 'Recorder', 'Pan Flute', 'Blown Bottle', 'Shakuhachi', 'Whistle', 'Ocarina'],
+  ['Synth Lead', 'Lead 1 (square)', 'Lead 2 (sawtooth)', 'Lead 3 (calliope)', 'Lead 4 (chiff)', 'Lead 5 (charang)', 'Lead 6 (voice)', 'Lead 7 (fifths)', 'Lead 8 (bass + lead)'],
+  ['Synth Pad', 'Pad 1 (new age)', 'Pad 2 (warm)', 'Pad 3 (polysynth)', 'Pad 4 (choir)', 'Pad 5 (bowed)', 'Pad 6 (metallic)', 'Pad 7 (halo)', 'Pad 8 (sweep)'],
+  ['Synth Effects', 'FX 1 (rain)', 'FX 2 (soundtrack)', 'FX 3 (crystal)', 'FX 4 (atmosphere)', 'FX 5 (brightness)', 'FX 6 (goblins)', 'FX 7 (echoes)', 'FX 8 (sci-fi)'],
+  ['Ethnic', 'Sitar', 'Banjo', 'Shamisen', 'Koto', 'Kalimba', 'Bagpipe', 'Fiddle', 'Shanai'],
+  ['Percussive', 'Tinkle Bell', 'Agogo', 'Steel Drums', 'Woodblock', 'Taiko Drum', 'Melodic Tom', 'Synth Drum', 'Reverse Cymbal'],
+  ['Sound Effects', 'Guitar Fret Noise', 'Breath Noise', 'Seashore', 'Bird Tweet', 'Telephone Ring', 'Helicopter', 'Applause', 'Gunshot'],
+];
+const gmName = program => GM_FAMILIES[program >> 3]?.[(program & 7) + 1] ?? `Program ${program}`;
+// The song's own instrument (and mid-song instrument changes) per track, so an override can be undone.
+const originalSound = new WeakMap();
+
 const api = new at.AlphaTabApi($('alphaTab'), {
   core: {
     fontDirectory: abs('/alphatab/font/'),
@@ -116,7 +151,7 @@ const api = new at.AlphaTabApi($('alphaTab'), {
   },
   player: {
     playerMode: at.PlayerMode.EnabledSynthesizer,
-    soundFont: abs('/alphatab/soundfont/sonivox.sf2'),
+    soundFont: SOUNDFONTS[sound.id].url,
     scrollElement: ui.viewport,
     enableCursor: true,
     enableAnimatedBeatCursor: true,
@@ -583,9 +618,10 @@ function buildTrackList() {
         <button class="mute" title="Mute">M</button>
         <button class="solo" title="Solo">S</button>
         <input type="range" min="0" max="16" value="${track.playbackInfo.volume}" title="Volume" aria-label="Track volume">
-      </div>`;
+      </div>
+      ${track.staves[0].isPercussion ? '' : `<div class="track-sound"><select title="Instrument sound (synth audio only)" aria-label="Instrument sound">${programOptions(track)}</select></div>`}`;
     li.addEventListener('click', e => {
-      if (e.target.closest('.track-controls')) return;
+      if (e.target.closest('.track-controls, .track-sound')) return;
       if (ui.multiTrack.checked) {
         if (state.selected.has(i) && state.selected.size > 1) state.selected.delete(i);
         else state.selected.add(i);
@@ -609,9 +645,70 @@ function buildTrackList() {
     li.querySelector('input').addEventListener('input', e => {
       api.changeTrackVolume([track], Number(e.target.value) / Math.max(1, track.playbackInfo.volume));
     });
+    li.querySelector('.track-sound select')?.addEventListener('change', e => {
+      setTrackProgram(track, e.target.value === '' ? null : Number(e.target.value));
+      e.target.classList.toggle('changed', e.target.value !== '');
+      li.querySelector('.track-icon').textContent = trackIcon(track);
+    });
     ui.tracks.appendChild(li);
   });
 }
+function programOptions(track) {
+  const original = originalSound.get(track)?.program ?? track.playbackInfo.program;
+  const groups = GM_FAMILIES.map(([family, ...names], f) => `<optgroup label="${family}">${
+    names.map((n, i) => `<option value="${f * 8 + i}">${escapeHtml(n)}</option>`).join('')}</optgroup>`);
+  // Guitar and bass first: that is what people swap most.
+  const order = [3, 4, ...GM_FAMILIES.keys()].filter((f, i, a) => a.indexOf(f) === i);
+  return `<option value="">Song default: ${escapeHtml(gmName(original))}</option>${order.map(f => groups[f]).join('')}`;
+}
+
+/** Plays a track with another General MIDI instrument, or restores the song's own sounds (program = null). */
+function setTrackProgram(track, program) {
+  if (!originalSound.has(track)) {
+    const changes = [];
+    for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) {
+      for (const a of beat.automations) if (a.type === at.model.AutomationType.Instrument) changes.push([beat, a]);
+    }
+    originalSound.set(track, { program: track.playbackInfo.program, changes });
+  }
+  const orig = originalSound.get(track);
+  for (const [beat, a] of orig.changes) {
+    const i = beat.automations.indexOf(a);
+    if (program === null && i < 0) beat.automations.push(a);
+    if (program !== null && i >= 0) beat.automations.splice(i, 1);
+  }
+  track.playbackInfo.program = program ?? orig.program;
+  if (api.playerState === at.synth.PlayerState.Playing) api.pause();
+  const tick = api.tickPosition;
+  api.loadMidiForScore();
+  api.tickPosition = tick;
+  reapplyMixer();
+  setStatus(`${track.name}: ${gmName(track.playbackInfo.program)}`);
+}
+
+// Regenerating the MIDI resets the synth channels, so push the mixer settings again.
+function reapplyMixer() {
+  for (const li of ui.tracks.children) {
+    const track = state.score.tracks[Number(li.dataset.index)];
+    const vol = Number(li.querySelector('input[type=range]').value);
+    api.changeTrackMute([track], li.querySelector('.mute').classList.contains('on'));
+    api.changeTrackSolo([track], li.querySelector('.solo').classList.contains('on'));
+    api.changeTrackVolume([track], vol / Math.max(1, track.playbackInfo.volume));
+  }
+}
+
+function loadSoundFontChoice(id) {
+  if (!SOUNDFONTS[id]) id = 'sonivox';
+  ui.soundFont.value = id;
+  if (id === sound.id && !sound.pending) return;
+  if (api.playerState === at.synth.PlayerState.Playing) api.pause();
+  sound.id = id;
+  sound.pending = id;
+  store.set('soundfont', id);
+  setStatus(`Loading ${SOUNDFONTS[id].name}…`);
+  api.loadSoundFont(SOUNDFONTS[id].url, false);
+}
+
 function updateTrackHighlight() {
   for (const li of ui.tracks.children) li.classList.toggle('active', state.selected.has(Number(li.dataset.index)));
 }
@@ -733,8 +830,26 @@ api.scoreLoaded.on(score => {
   showBar(score.masterBars[0]);
   drawFretboard();
 });
-api.soundFontLoad.on(e => setStatus(`Loading sounds… ${Math.round((e.loaded / e.total) * 100)}%`));
-api.playerReady.on(() => { setPlayerEnabled(true); if (!youtube.active) setStatus('Ready'); });
+api.soundFontLoad.on(e => {
+  const name = SOUNDFONTS[sound.pending || sound.id].name;
+  setStatus(e.total > 0
+    ? `Loading ${name}… ${Math.round((e.loaded / e.total) * 100)}% of ${Math.round(e.total / 1e6)} MB`
+    : `Loading ${name}…`);
+});
+api.soundFontLoaded.on(() => {
+  sound.pending = null;
+  if (!youtube.active) setStatus(`Ready · ${SOUNDFONTS[sound.id].name} sounds`);
+  if (state.score) reapplyMixer();
+});
+api.error.on(e => {
+  // A larger soundfont failed to download: fall back to the built-in one.
+  if (sound.pending && sound.pending !== 'sonivox') {
+    const name = SOUNDFONTS[sound.pending].name;
+    loadSoundFontChoice('sonivox');
+    setStatus(`Could not load ${name} (${e?.message || 'download failed'}). Using Sonivox.`, true);
+  }
+});
+api.playerReady.on(() => { setPlayerEnabled(true); if (!youtube.active) setStatus(`Ready · ${SOUNDFONTS[sound.id].name} sounds`); });
 api.playerStateChanged.on(e => {
   const playing = e.state === at.synth.PlayerState.Playing;
   ui.play.textContent = playing ? '⏸' : '▶';
@@ -896,6 +1011,8 @@ api.metronomeVolume = 0;
 api.countInVolume = 0;
 applyTheme(store.get('theme', 'system'), false);
 applyAppearance();
+ui.soundFont.value = sound.id;
+ui.soundFont.addEventListener('change', () => loadSoundFontChoice(ui.soundFont.value));
 
 const params = new URLSearchParams(location.search);
 const initial = params.get('url');

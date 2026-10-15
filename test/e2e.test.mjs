@@ -106,6 +106,33 @@ try {
     if (Math.abs(s.speed - 0.95) > 1e-6 || !s.loop || s.met !== 1) throw new Error(JSON.stringify(s));
   });
 
+  await step('per-track instrument override and restore', async () => {
+    const sel = '.track .track-sound select';
+    const before = await page.$eval(sel, s => s.closest('.track').dataset.index);
+    const orig = await page.evaluate(i => window.tabPlayerApi.score.tracks[i].playbackInfo.program, Number(before));
+    await page.select(sel, '30');
+    const after = await page.evaluate(i => window.tabPlayerApi.score.tracks[i].playbackInfo.program, Number(before));
+    if (after !== 30) throw new Error(`program ${after}`);
+    await page.waitForFunction(() => window.tabPlayerApi.isReadyForPlayback, { timeout: 20000 });
+    await page.select(sel, '');
+    const restored = await page.evaluate(i => window.tabPlayerApi.score.tracks[i].playbackInfo.program, Number(before));
+    if (restored !== orig) throw new Error(`restored ${restored}, expected ${orig}`);
+  });
+
+  await step('switch to a larger soundfont and play', async () => {
+    await page.select('#soundfont', 'fluid');
+    await page.waitForFunction(() => /Ready · FluidR3|Could not load/.test(document.getElementById('status').textContent), { timeout: 180000 });
+    const status = await page.$eval('#status', e => e.textContent);
+    if (!status.includes('FluidR3')) throw new Error(status);
+    await page.waitForFunction(() => !document.getElementById('play').disabled, { timeout: 30000 });
+    const t0 = await page.evaluate(() => window.tabPlayerApi.timePosition);
+    await page.click('#play');
+    await page.waitForFunction(t => window.tabPlayerApi.timePosition > t + 300, { timeout: 20000 }, t0);
+    await page.click('#play');
+    await page.select('#soundfont', 'sonivox');
+    await page.waitForFunction(() => /Ready · Sonivox/.test(document.getElementById('status').textContent), { timeout: 30000 });
+  });
+
   await step('track details show tuning names', async () => {
     const subs = await page.$$eval('.track-sub', els => els.map(e => e.textContent));
     if (!subs.includes('Standard') || !subs.includes('Drums')) throw new Error(subs.join(' | '));

@@ -23,8 +23,9 @@ Requires Node.js 18+.
 - **Save as Guitar Pro (.gp)** and **MIDI**, plus **Print / PDF**.
 - **Notation**: tab only (default; tracks without tab such as vocals and drums show standard notation), standard notation + tab, tab with rhythm, score only. Page or horizontal layout, zoom. View settings (notation, layout, zoom, fretboard, multi-track) are remembered for every song and kept in sync across browser tabs.
 - **Playback**: play/pause/stop, seek, speed 25–200%, loop a selected range (drag across bars), metronome, count-in, master volume, current bar and section display.
-- **Themes**: light, dark (including the score), midnight, sepia, high contrast, or follow the system setting.
-- **Mixer**: per-track mute / solo / volume; single or multi-track view.
+- **Themes**: light, dark (including the score), midnight, Nord, forest, Dracula, rosé, sepia, high contrast, or follow the system setting. Pick an accent color, UI size and density; drag the sidebar edge or the fretboard divider to resize.
+- **Mixer**: per-track mute / solo / volume and instrument sound (any General MIDI instrument, e.g. swap Overdriven for Distortion Guitar); single or multi-track view.
+- **Sounds**: choose the synth soundfont under *Sound*: the small built-in Sonivox, or GeneralUser GS, MuseScore General or FluidR3 Mono. Larger ones are downloaded by the server on first use and cached in `cache/soundfonts/`.
 - **Fretboard**: live fretboard showing the notes being played on the selected track.
 - **Techniques imported from Songsterr**: bends, whammy bar, slides, hammer-ons/pull-offs, ties, vibrato, dead/ghost notes, harmonics, palm mute, let ring, staccato, accents, dynamics, crescendo, pick and brush strokes, up/down strokes, arpeggios, tremolo picking, trills, tap/slap/pop, sustain pedal, grace notes, tuplets, triplet feel, fermatas, chord names, tempo changes, time and key signatures, section markers, repeats, capo, tuning names, mid-song instrument changes, multiple voices, drums (Guitar Pro 7 articulations).
 

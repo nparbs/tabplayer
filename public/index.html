@@ -83,6 +83,16 @@
       </label>
       <label class="row"><span>Fretboard</span><input id="show-fretboard" type="checkbox" checked></label>
       <label class="row"><span>Multi-track view</span><input id="multi-track" type="checkbox"></label>
+      <h3>Sound</h3>
+      <label class="row stacked">Soundfont (synth audio)
+        <select id="soundfont" title="Instrument samples used by the synthesizer">
+          <option value="sonivox">Sonivox: small, built in (1 MB)</option>
+          <option value="generaluser">GeneralUser GS: best guitars (32 MB)</option>
+          <option value="musescore">MuseScore General: rich, realistic (40 MB)</option>
+          <option value="fluid">FluidR3 Mono: balanced (15 MB)</option>
+        </select>
+      </label>
+      <p class="muted small-note">Larger soundfonts download once, then load from the cache. Each track's instrument can be changed in its card above.</p>
       <h3>Appearance</h3>
       <label class="row">Theme
         <select id="theme">

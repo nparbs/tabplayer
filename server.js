@@ -1,5 +1,7 @@
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { parseSongsterrUrl, normalizeVideos, normalizeSearchResults } from './public/songsterr.js';
 
@@ -112,9 +114,60 @@ export async function searchSongs(query, { from = 0, size = 20, fetchImpl = fetc
   return { songs: normalizeSearchResults(raw), next: from + count, hasMore: count >= Number(params.get('size')) };
 }
 
+// Larger General MIDI soundfonts, downloaded on first use and cached on disk.
+export const SOUNDFONTS = {
+  generaluser: { file: 'GeneralUser-GS.sf2', url: 'https://github.com/mrbumpy409/GeneralUser-GS/raw/main/GeneralUser-GS.sf2' },
+  musescore: { file: 'MuseScore_General.sf3', url: 'https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf3' },
+  fluid: { file: 'FluidR3Mono_GM.sf3', url: 'https://github.com/musescore/MuseScore/raw/2.3.2/share/sound/FluidR3Mono_GM.sf3' },
+};
+const SOUNDFONT_DIR = process.env.TABPLAYER_SOUNDFONT_DIR || path.join(__dirname, 'cache', 'soundfonts');
+const downloading = new Set();
+
+/** Streams a soundfont to the client; on the first request it is downloaded and saved at the same time. */
+async function serveSoundFont(req, res, fetchImpl = fetch) {
+  const sf = SOUNDFONTS[req.params.id];
+  if (!sf) return res.status(404).json({ error: 'Unknown soundfont' });
+  const file = path.join(SOUNDFONT_DIR, sf.file);
+  if (fs.existsSync(file)) return res.sendFile(file, { maxAge: '30d' });
+
+  let upstream;
+  try {
+    upstream = await fetchImpl(sf.url, { headers: UA });
+  } catch {
+    return res.status(502).json({ error: 'Could not download the soundfont. Check your internet connection.' });
+  }
+  if (!upstream.ok || !upstream.body) return res.status(502).json({ error: `Soundfont download failed (HTTP ${upstream.status}).` });
+
+  const length = upstream.headers.get('content-length');
+  res.set('Content-Type', 'application/octet-stream');
+  if (length) res.set('Content-Length', length);
+  const body = Readable.fromWeb(upstream.body);
+  body.pipe(res);
+
+  // Only one request writes the cache file; others just stream through.
+  if (downloading.has(sf.file)) {
+    res.on('close', () => { if (!res.writableFinished) body.destroy(); });
+    return;
+  }
+  downloading.add(sf.file);
+  fs.mkdirSync(SOUNDFONT_DIR, { recursive: true });
+  const tmp = `${file}.${process.pid}.part`;
+  const out = fs.createWriteStream(tmp);
+  body.pipe(out);
+  const cleanup = () => { downloading.delete(sf.file); fs.rm(tmp, { force: true }, () => {}); };
+  body.on('error', () => { out.destroy(); res.destroy(); cleanup(); });
+  out.on('error', cleanup);
+  out.on('finish', () => {
+    if (length && fs.statSync(tmp).size !== Number(length)) return cleanup();
+    fs.rename(tmp, file, err => { downloading.delete(sf.file); if (err) cleanup(); });
+  });
+}
+
 export const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/alphatab', express.static(path.join(__dirname, 'node_modules/@coderline/alphatab/dist')));
+
+app.get('/api/soundfont/:id', (req, res) => serveSoundFont(req, res));
 
 app.get('/api/songsterr', async (req, res) => {
   try {

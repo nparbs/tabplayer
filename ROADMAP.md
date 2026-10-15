@@ -59,7 +59,8 @@ Guitar Pro is an editor. alphaTab is a renderer/player, so editing needs our own
 
 - ⬜ Desktop app (Electron or Tauri) with native file associations for `.gp*`
 - ⬜ Installable PWA with offline cache of opened songs
-- ⬜ Better soundfont option (larger GM bank, downloadable)
+- ✅ Better soundfont option (larger GM bank, downloadable)
+- ✅ Per-track instrument override
 - ⬜ CI: run unit, converter and e2e tests on GitHub Actions
 - ⬜ YouTube audio for files opened locally (custom video URL + manual sync)
 
