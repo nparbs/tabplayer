@@ -1,0 +1,22 @@
+{
+  "name": "tabplayer",
+  "version": "1.0.0",
+  "description": "Guitar Pro-style tab player with Songsterr import, built on alphaTab",
+  "scripts": {
+    "test": "node test/convert.test.mjs && node test/e2e.test.mjs",
+    "start": "node server.js",
+    "test:convert": "node test/convert.test.mjs",
+    "test:e2e": "node test/e2e.test.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@coderline/alphatab": "^1.8.4",
+    "express": "^5.3.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.14.0"
+  }
+}

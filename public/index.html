@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TabPlayer</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎸</text></svg>">
+  <script src="/alphatab/alphaTab.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🎸 TabPlayer</div>
+    <form id="load-form" class="load-form">
+      <input id="url-input" type="text" placeholder="Paste a Songsterr URL (…-tab-s27t1) or song id" autocomplete="off">
+      <button type="submit" class="primary">Load</button>
+    </form>
+    <div class="file-actions">
+      <label class="btn" title="Open a Guitar Pro / MusicXML / alphaTex file">
+        Open file<input id="file-input" type="file" accept=".gp,.gpx,.gp3,.gp4,.gp5,.gp7,.gp8,.xml,.musicxml,.mxl,.cap,.atex,.tex" hidden>
+      </label>
+      <button id="export-gp" class="btn" disabled title="Save as Guitar Pro 7 (.gp)">Save .gp</button>
+      <button id="export-midi" class="btn" disabled title="Save as MIDI">Save MIDI</button>
+      <button id="print" class="btn" disabled title="Print / PDF">Print</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <aside class="sidebar">
+      <div class="song-info">
+        <div id="song-title" class="song-title">No song loaded</div>
+        <div id="song-artist" class="song-artist">Load a Songsterr URL or open a file</div>
+      </div>
+      <h3>Tracks</h3>
+      <ul id="track-list" class="track-list"></ul>
+      <h3>View</h3>
+      <label class="row">Notation
+        <select id="stave-profile">
+          <option value="Default">Score + Tab</option>
+          <option value="Tab">Tab only</option>
+          <option value="TabMixed">Tab + rhythm</option>
+          <option value="Score">Score only</option>
+        </select>
+      </label>
+      <label class="row">Layout
+        <select id="layout-mode">
+          <option value="Page">Page</option>
+          <option value="Horizontal">Horizontal</option>
+        </select>
+      </label>
+      <label class="row">Zoom
+        <select id="zoom">
+          <option value="0.6">60%</option><option value="0.8">80%</option>
+          <option value="1" selected>100%</option><option value="1.2">120%</option>
+          <option value="1.5">150%</option><option value="2">200%</option>
+        </select>
+      </label>
+      <label class="row"><span>Fretboard</span><input id="show-fretboard" type="checkbox" checked></label>
+      <label class="row"><span>Multi-track view</span><input id="multi-track" type="checkbox"></label>
+      <p class="hint">Click a note to jump there. Drag across bars to select a loop range.<br>
+        <kbd>Space</kbd> play/pause · <kbd>Esc</kbd> stop · <kbd>L</kbd> loop · <kbd>M</kbd> metronome · <kbd>+</kbd>/<kbd>-</kbd> speed</p>
+    </aside>
+
+    <section class="score-area">
+      <div id="overlay" class="overlay hidden"><div class="spinner"></div><div id="overlay-text">Loading…</div></div>
+      <div id="viewport" class="viewport">
+        <div id="alphaTab"></div>
+      </div>
+      <canvas id="fretboard" class="fretboard"></canvas>
+    </section>
+  </div>
+
+  <footer class="transport">
+    <div class="transport-buttons">
+      <button id="stop" class="icon" disabled title="Stop (Esc)">⏹</button>
+      <button id="play" class="icon play" disabled title="Play/Pause (Space)">▶</button>
+    </div>
+    <div class="time"><span id="time-current">0:00</span> / <span id="time-total">0:00</span></div>
+    <input id="seek" type="range" min="0" max="1000" value="0" disabled class="seek">
+    <div class="toggles">
+      <button id="loop" class="toggle" disabled title="Loop selection (L)">🔁 Loop</button>
+      <button id="metronome" class="toggle" disabled title="Metronome (M)">🥁 Metronome</button>
+      <button id="count-in" class="toggle" disabled title="Count-in">⏱ Count-in</button>
+    </div>
+    <label class="speed">Speed <input id="speed" type="range" min="25" max="200" step="5" value="100"> <span id="speed-value">100%</span></label>
+    <label class="speed">Vol <input id="master-volume" type="range" min="0" max="100" value="80"></label>
+    <div id="status" class="status"></div>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
