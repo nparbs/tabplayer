@@ -9,6 +9,7 @@ import {
   looksLikeSongsterrLink, songsterrUrl, normalizeSearchResults,
 } from '../public/songsterr.js';
 import { fetchSongsterr, fetchRevisions, searchSongs } from '../server.js';
+import { songKey, clampRange, normalizeTrainer, trainerSpeed, parseStored, withLoop } from '../public/practice.js';
 
 const M = at.model;
 const note = (fret, string, extra = {}) => ({ fret, string, ...extra });
@@ -305,4 +306,43 @@ test('searchSongs: queries Songsterr and pages', async () => {
   assert.equal(r.hasMore, true);
   await assert.rejects(searchSongs('a', { fetchImpl: impl }), { status: 400 });
   await assert.rejects(searchSongs('abc', { fetchImpl: async () => json(503, {}) }), { status: 502, message: /search failed/ });
+});
+
+// ---------- practice tools ----------
+
+test('practice: song keys prefer the Songsterr id', () => {
+  assert.equal(songKey({ songId: 269, title: 'Smells Like Teen Spirit' }), 'songsterr:269');
+  assert.equal(songKey({ title: 'My Song', artist: 'Me' }), 'file:my song|me');
+  assert.equal(songKey({}), null);
+});
+
+test('practice: bar ranges are clamped, ordered and validated', () => {
+  assert.deepEqual(clampRange(5, 8, 40), { from: 5, to: 8 });
+  assert.deepEqual(clampRange('9', '3', 40), { from: 3, to: 9 });
+  assert.deepEqual(clampRange(0, 99, 40), { from: 1, to: 40 });
+  assert.deepEqual(clampRange(7, '', 40), { from: 7, to: 7 });
+  assert.equal(clampRange('', '', 40), null);
+  assert.equal(clampRange('x', 4, 40), null);
+  assert.equal(clampRange(1, 4, 0), null);
+});
+
+test('practice: speed trainer steps up per pass and stops at the top speed', () => {
+  const t = { start: 60, step: 10, every: 2, max: 85 };
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map(p => trainerSpeed(t, p)), [60, 60, 70, 70, 80, 80, 85]);
+  assert.deepEqual(normalizeTrainer({ start: 10, step: 0, every: '', max: 300 }), { start: 25, step: 1, every: 1, max: 200 });
+  assert.deepEqual(normalizeTrainer({ start: 120, max: 90 }), { start: 120, step: 5, every: 1, max: 120 });
+  assert.deepEqual(normalizeTrainer(), { start: 60, step: 5, every: 1, max: 100 });
+});
+
+test('practice: saved loops survive bad storage and stay bounded', () => {
+  assert.deepEqual(parseStored('not json'), {});
+  assert.deepEqual(parseStored('[1,2]'), {});
+  assert.deepEqual(parseStored(null), {});
+  let loops = withLoop({}, 'a', { from: 1, to: 4 });
+  loops = withLoop(loops, 'b', { from: 2, to: 3 });
+  assert.deepEqual(loops, { a: { from: 1, to: 4 }, b: { from: 2, to: 3 } });
+  assert.deepEqual(withLoop(loops, 'a', null), { b: { from: 2, to: 3 } });
+  for (let i = 0; i < 250; i++) loops = withLoop(loops, `k${i}`, { from: 1, to: 2 });
+  assert.equal(Object.keys(loops).length, 200);
+  assert.ok(loops.k249 && !loops.a, 'oldest entries are dropped first');
 });

@@ -1,5 +1,6 @@
 import { songsterrToScore, parseSongsterrUrl, tuningName, looksLikeSongsterrLink, songsterrUrl } from './songsterr.js';
 import { YouTubeAudio } from './youtube.js';
+import { songKey, clampRange, normalizeTrainer, trainerSpeed, parseStored, withLoop } from './practice.js';
 
 const at = window.alphaTab;
 const $ = id => document.getElementById(id);
@@ -25,6 +26,10 @@ const ui = {
   timeCurrent: $('time-current'), timeTotal: $('time-total'),
   loop: $('loop'), metronome: $('metronome'), countIn: $('count-in'), audioSource: $('audio-source'),
   speed: $('speed'), speedValue: $('speed-value'), volume: $('master-volume'), status: $('status'),
+  loopFrom: $('loop-from'), loopTo: $('loop-to'), loopSetA: $('loop-set-a'), loopSetB: $('loop-set-b'),
+  loopApply: $('loop-apply'), loopClear: $('loop-clear'),
+  trainerOn: $('trainer-on'), trainerStart: $('trainer-start'), trainerStep: $('trainer-step'),
+  trainerEvery: $('trainer-every'), trainerMax: $('trainer-max'), trainerInfo: $('trainer-info'),
 };
 
 const state = {
@@ -197,6 +202,11 @@ function setPlayerEnabled(on) {
   for (const el of [ui.play, ui.stop, ui.seek, ui.loop]) el.disabled = !on;
   // The metronome and count-in come from the synthesizer, so they are silent with YouTube audio.
   for (const el of [ui.metronome, ui.countIn]) el.disabled = !on || youtube.active;
+  const loopOn = on && !!state.score;
+  for (const el of [ui.loopFrom, ui.loopTo, ui.loopSetA, ui.loopSetB, ui.loopApply, ui.loopClear]) el.disabled = !loopOn;
+  // The trainer counts loop passes reported by the synthesizer, so it needs synth audio too.
+  ui.trainerOn.disabled = !loopOn || youtube.active;
+  if (youtube.active && ui.trainerOn.checked) { ui.trainerOn.checked = false; trainerChanged(); }
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -731,6 +741,90 @@ function jumpBar(delta) {
   showBar(target);
 }
 
+// ---------- practice: loop by bar number, speed trainer ----------
+const practice = { passes: 0, trainer: normalizeTrainer(parseStored(store.get('trainer'))) };
+
+function currentSongKey() {
+  return songKey({ songId: state.songsterr?.songId, title: state.score?.title, artist: state.score?.artist });
+}
+function restoreLoopInputs() {
+  const count = state.score?.masterBars.length ?? 0;
+  for (const el of [ui.loopFrom, ui.loopTo]) { el.max = count; el.value = ''; }
+  const key = currentSongKey();
+  const saved = key ? parseStored(store.get('loops'))[key] : null;
+  const range = saved && clampRange(saved.from, saved.to, count);
+  if (range) {
+    ui.loopFrom.value = range.from;
+    ui.loopTo.value = range.to;
+    setStatus(`Saved loop for this song: bars ${range.from}–${range.to}. Click "Loop these bars" to use it.`);
+  }
+}
+function loopBeats(range) {
+  // Any rendered track works: alphaTab maps the beats to playback ticks (including repeats).
+  const bars = api.tracks[0]?.staves[0]?.bars;
+  const first = bars?.[range.from - 1]?.voices[0]?.beats[0];
+  const lastBeats = bars?.[range.to - 1]?.voices[0]?.beats;
+  return first && lastBeats?.length ? [first, lastBeats[lastBeats.length - 1]] : null;
+}
+function applyLoopBars() {
+  const range = clampRange(ui.loopFrom.value, ui.loopTo.value, state.score?.masterBars.length);
+  if (!range) { setStatus('Enter the first and last bar to loop.', true); return; }
+  const beats = loopBeats(range);
+  if (!beats) { setStatus('Could not find those bars in the shown track.', true); return; }
+  ui.loopFrom.value = range.from;
+  ui.loopTo.value = range.to;
+  api.highlightPlaybackRange(beats[0], beats[1]);
+  api.applyPlaybackRangeFromHighlight(); // also moves the playhead to the loop start
+  if (!api.playbackRange) {
+    // alphaTab drops the range when start and end are the same beat (a one-bar loop over a bar
+    // holding a single beat), so build it from the bar's length.
+    const start = api.tickPosition;
+    api.playbackRange = { startTick: start, endTick: start + state.score.masterBars[range.from - 1].calculateDuration() - 50 };
+  }
+  api.isLooping = toggle(ui.loop, true);
+  practice.passes = 0;
+  if (ui.trainerOn.checked) setSpeed(practice.trainer.start);
+  const key = currentSongKey();
+  if (key) store.set('loops', JSON.stringify(withLoop(parseStored(store.get('loops')), key, range)));
+  setStatus(`Looping bars ${range.from}–${range.to}${ui.trainerOn.checked ? ` from ${practice.trainer.start}%` : ''}.`);
+}
+function clearLoop() {
+  api.clearPlaybackRangeHighlight();
+  api.playbackRange = null;
+  api.isLooping = toggle(ui.loop, false);
+  ui.loopFrom.value = ui.loopTo.value = '';
+  const key = currentSongKey();
+  if (key) store.set('loops', JSON.stringify(withLoop(parseStored(store.get('loops')), key, null)));
+  setStatus('Loop cleared.');
+}
+function showTrainer() {
+  const t = practice.trainer;
+  ui.trainerStart.value = t.start; ui.trainerStep.value = t.step; ui.trainerEvery.value = t.every; ui.trainerMax.value = t.max;
+  for (const el of [ui.trainerStart, ui.trainerStep, ui.trainerEvery, ui.trainerMax]) el.disabled = !ui.trainerOn.checked;
+}
+function trainerChanged() {
+  practice.trainer = normalizeTrainer({ start: ui.trainerStart.value, step: ui.trainerStep.value,
+    every: ui.trainerEvery.value, max: ui.trainerMax.value });
+  store.set('trainer', JSON.stringify(practice.trainer));
+  practice.passes = 0;
+  showTrainer();
+  if (ui.trainerOn.checked) {
+    const t = practice.trainer;
+    setSpeed(t.start);
+    if (!api.isLooping) api.isLooping = toggle(ui.loop, true);
+    ui.trainerInfo.textContent = `Pass 1 at ${t.start}%, then +${t.step}% every ${t.every > 1 ? `${t.every} passes` : 'pass'} up to ${t.max}%.`;
+  } else {
+    ui.trainerInfo.textContent = 'Speeds up each time the loop comes round. Uses the synth, not YouTube audio.';
+  }
+}
+function onLoopPass() {
+  if (!ui.trainerOn.checked || !api.isLooping) return;
+  practice.passes += 1;
+  const pct = trainerSpeed(practice.trainer, practice.passes);
+  setSpeed(pct);
+  ui.trainerInfo.textContent = `Pass ${practice.passes + 1} at ${pct}%${pct >= practice.trainer.max ? ' (top speed)' : ''}.`;
+}
+
 // ---------- fretboard ----------
 function drawFretboard() {
   const canvas = ui.fretboard;
@@ -829,6 +923,8 @@ api.scoreLoaded.on(score => {
   setControlsEnabled(true);
   showBar(score.masterBars[0]);
   drawFretboard();
+  restoreLoopInputs();
+  setPlayerEnabled(api.isReadyForPlayback);
 });
 api.soundFontLoad.on(e => {
   const name = SOUNDFONTS[sound.pending || sound.id].name;
@@ -865,6 +961,7 @@ api.playedBeatChanged.on(beat => showBar(beat?.voice.bar.masterBar));
 api.playbackRangeChanged?.on(e => {
   if (e.playbackRange && !api.isLooping) setStatus('Selection set. Press L to loop it.');
 });
+api.playerFinished.on(onLoopPass); // fires each time a loop comes round, before playback jumps back
 
 // ---------- UI events ----------
 ui.form.addEventListener('submit', e => {
@@ -932,6 +1029,19 @@ function setSpeed(pct) {
   api.playbackSpeed = pct / 100;
 }
 ui.speed.addEventListener('input', () => setSpeed(Number(ui.speed.value)));
+ui.loopApply.addEventListener('click', applyLoopBars);
+ui.loopClear.addEventListener('click', clearLoop);
+ui.loopSetA.addEventListener('click', () => {
+  ui.loopFrom.value = (state.currentBar ?? 0) + 1;
+  if (!ui.loopTo.value || Number(ui.loopTo.value) < Number(ui.loopFrom.value)) ui.loopTo.value = ui.loopFrom.value;
+});
+ui.loopSetB.addEventListener('click', () => {
+  ui.loopTo.value = (state.currentBar ?? 0) + 1;
+  if (!ui.loopFrom.value) ui.loopFrom.value = ui.loopTo.value;
+});
+for (const el of [ui.loopFrom, ui.loopTo]) el.addEventListener('keydown', e => { if (e.key === 'Enter') applyLoopBars(); });
+ui.trainerOn.addEventListener('change', trainerChanged);
+for (const el of [ui.trainerStart, ui.trainerStep, ui.trainerEvery, ui.trainerMax]) el.addEventListener('change', trainerChanged);
 ui.volume.addEventListener('input', () => { api.masterVolume = Number(ui.volume.value) / 100; });
 ui.audioSource.addEventListener('change', () => selectAudioSource(ui.audioSource.value));
 ui.videoClose.addEventListener('click', () => selectAudioSource('synth'));
@@ -990,7 +1100,7 @@ ui.multiTrack.addEventListener('change', () => {
 window.addEventListener('resize', drawFretboard);
 
 document.addEventListener('keydown', e => {
-  if (e.target.matches('input[type=text], select') || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.matches('input[type=text], input[type=number], select') || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === '/') { e.preventDefault(); ui.url.focus(); ui.url.select(); return; }
   if (e.key === 't' || e.key === 'T') { ui.themeToggle.click(); return; }
   if (!api.isReadyForPlayback && e.key !== 'Escape') return;
@@ -1012,6 +1122,7 @@ api.countInVolume = 0;
 applyTheme(store.get('theme', 'system'), false);
 applyAppearance();
 ui.soundFont.value = sound.id;
+showTrainer();
 ui.soundFont.addEventListener('change', () => loadSoundFontChoice(ui.soundFont.value));
 
 const params = new URLSearchParams(location.search);

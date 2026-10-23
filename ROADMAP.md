@@ -32,8 +32,8 @@ The goal is to get as close to Guitar Pro as practical in a browser app. Status:
 
 ## v0.3: Practice tools (Guitar Pro "Speed Trainer" and more)
 
-- ⬜ Speed trainer: loop that increases tempo by N% each pass
-- ⬜ A/B loop markers by bar number, saved per song
+- ✅ Speed trainer: loop that increases tempo by N% each pass (or every N passes) up to a top speed
+- ✅ A/B loop markers by bar number, saved per song
 - ⬜ Count-in length and metronome sound options
 - ⬜ Per-track transpose, and capo for playback
 - ⬜ Chord diagrams panel

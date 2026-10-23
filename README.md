@@ -23,6 +23,7 @@ Requires Node.js 18+.
 - **Save as Guitar Pro (.gp)** and **MIDI**, plus **Print / PDF**.
 - **Notation**: tab only (default; tracks without tab such as vocals and drums show standard notation), standard notation + tab, tab with rhythm, score only. Page or horizontal layout, zoom. View settings (notation, layout, zoom, fretboard, multi-track) are remembered for every song and kept in sync across browser tabs.
 - **Playback**: play/pause/stop, seek, speed 25–200%, loop a selected range (drag across bars), metronome, count-in, master volume, current bar and section display.
+- **Practice**: loop bars by number (type them, or press **A** / **B** to take the current bar). The loop is remembered for each song. The **speed trainer** starts the loop at a set speed and adds a few percent each time it comes round (or every few passes), up to a top speed. It works with synth audio.
 - **Themes**: light, dark (including the score), midnight, Nord, forest, Dracula, rosé, sepia, high contrast, or follow the system setting. Pick an accent color, UI size and density; drag the sidebar edge or the fretboard divider to resize.
 - **Mixer**: per-track mute / solo / volume and instrument sound (any General MIDI instrument, e.g. swap Overdriven for Distortion Guitar); single or multi-track view.
 - **Sounds**: choose the synth soundfont under *Sound*: the small built-in Sonivox, or GeneralUser GS, MuseScore General or FluidR3 Mono. Larger ones are downloaded by the server on first use and cached in `cache/soundfonts/`.
@@ -54,6 +55,7 @@ For YouTube audio, `public/youtube.js` switches alphaTab to its external-media p
 server.js              Express server + Songsterr proxy (song, search, revisions)
 public/index.html      UI
 public/app.js          Player UI logic (alphaTab API, mixer, fretboard, shortcuts)
+public/practice.js     Loop-by-bar and speed-trainer helpers
 public/songsterr.js    Songsterr JSON -> alphaTab Score converter, video sync helpers
 public/youtube.js      YouTube audio source synced with alphaTab
 public/style.css       Styles

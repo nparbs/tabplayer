@@ -106,6 +106,47 @@ try {
     if (Math.abs(s.speed - 0.95) > 1e-6 || !s.loop || s.met !== 1) throw new Error(JSON.stringify(s));
   });
 
+  await step('loop bars by number, saved per song, with the speed trainer', async () => {
+    await page.click('#loop'); // the previous step left looping on
+    await page.evaluate(() => { document.getElementById('loop-from').value = '3'; document.getElementById('loop-to').value = '2'; });
+    await page.click('#loop-apply');
+    const applied = await page.evaluate(() => ({
+      from: document.getElementById('loop-from').value, to: document.getElementById('loop-to').value,
+      range: window.tabPlayerApi.playbackRange, loop: window.tabPlayerApi.isLooping,
+      saved: JSON.parse(localStorage.getItem('tabplayer.loops') || '{}'),
+    }));
+    if (applied.from !== '2' || applied.to !== '3' || !applied.range || !applied.loop) throw new Error(JSON.stringify(applied));
+    if (!Object.values(applied.saved).some(r => r.from === 2 && r.to === 3)) throw new Error(`not saved: ${JSON.stringify(applied.saved)}`);
+
+    // One bar at 150 %, +10 % per pass: a pass takes about a second.
+    await page.evaluate(() => { document.getElementById('loop-to').value = '2'; });
+    await page.click('#loop-apply');
+    await page.click('#trainer-on');
+    await page.evaluate(() => {
+      for (const [id, v] of [['trainer-start', 150], ['trainer-step', 10], ['trainer-every', 1], ['trainer-max', 170]]) {
+        const el = document.getElementById(id);
+        el.value = v;
+        el.dispatchEvent(new Event('change'));
+      }
+    });
+    if (await page.evaluate(() => window.tabPlayerApi.playbackSpeed) !== 1.5) throw new Error('trainer did not set the start speed');
+    await page.click('#play');
+    await page.waitForFunction(() => window.tabPlayerApi.playbackSpeed >= 1.6, { timeout: 30000 });
+    await page.click('#play');
+    const info = await page.$eval('#trainer-info', e => e.textContent);
+    if (!/Pass \d+ at 1[67]0%/.test(info)) throw new Error(`trainer info: ${info}`);
+
+    await page.click('#trainer-on');
+    await page.click('#loop-clear');
+    const cleared = await page.evaluate(() => ({
+      range: window.tabPlayerApi.playbackRange, loop: window.tabPlayerApi.isLooping,
+      saved: Object.keys(JSON.parse(localStorage.getItem('tabplayer.loops') || '{}')).length,
+    }));
+    if (cleared.range || cleared.loop || cleared.saved !== 0) throw new Error(JSON.stringify(cleared));
+    await page.evaluate(() => { const s = document.getElementById('speed'); s.value = 95; s.dispatchEvent(new Event('input')); });
+    await page.click('#loop'); // leave looping on, as the earlier step did
+  });
+
   await step('per-track instrument override and restore', async () => {
     const sel = '.track .track-sound select';
     const before = await page.$eval(sel, s => s.closest('.track').dataset.index);

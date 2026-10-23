@@ -59,6 +59,28 @@
       </div>
       <h3>Tracks</h3>
       <ul id="track-list" class="track-list"></ul>
+      <h3>Practice</h3>
+      <div class="row loop-bars"><span>Loop bars</span>
+        <span class="range">
+          <input id="loop-from" type="number" min="1" step="1" aria-label="First bar of the loop" disabled>
+          <button id="loop-set-a" class="mini" title="Start at the current bar" disabled>A</button>
+          –
+          <input id="loop-to" type="number" min="1" step="1" aria-label="Last bar of the loop" disabled>
+          <button id="loop-set-b" class="mini" title="End at the current bar" disabled>B</button>
+        </span>
+      </div>
+      <div class="row">
+        <button id="loop-apply" class="btn grow" title="Loop these bars (saved for this song)" disabled>Loop these bars</button>
+        <button id="loop-clear" class="btn" title="Clear the loop and forget it for this song" disabled>Clear</button>
+      </div>
+      <label class="row"><span>Speed trainer</span><input id="trainer-on" type="checkbox" disabled></label>
+      <div id="trainer-opts" class="trainer-opts">
+        <label>Start <input id="trainer-start" type="number" min="25" max="200" step="5">%</label>
+        <label>+ <input id="trainer-step" type="number" min="1" max="50" step="1">%</label>
+        <label>every <input id="trainer-every" type="number" min="1" max="20" step="1"> pass(es)</label>
+        <label>up to <input id="trainer-max" type="number" min="25" max="200" step="5">%</label>
+      </div>
+      <p id="trainer-info" class="muted small-note">Speeds up each time the loop comes round. Uses the synth, not YouTube audio.</p>
       <h3>View</h3>
       <label class="row">Notation
         <select id="stave-profile">
@@ -127,7 +149,7 @@
       <details class="hint">
         <summary>Tips &amp; shortcuts</summary>
         <p>Drag the sidebar edge or the line above the fretboard to resize (double-click resets).</p>
-        <p>Click a note to jump there. Drag across bars to select a loop range.</p>
+        <p>Click a note to jump there. Drag across bars to select a loop range, or type bar numbers under Practice.</p>
         <p><kbd>Space</kbd> play/pause · <kbd>Esc</kbd> stop · <kbd>L</kbd> loop · <kbd>M</kbd> metronome ·
           <kbd>+</kbd>/<kbd>-</kbd> speed · <kbd>←</kbd>/<kbd>→</kbd> bar · <kbd>T</kbd> theme · <kbd>/</kbd> search</p>
       </details>
