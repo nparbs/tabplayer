@@ -24,7 +24,9 @@ let win = null;
 let rendererReady = false;
 const pending = []; // files to open once the page is listening
 
-if (!app.requestSingleInstanceLock()) {
+// One window per user; files opened later go to it. A scratch test profile (TABPLAYER_USER_DATA) runs on its
+// own so tests work while TabPlayer is open.
+if (!process.env.TABPLAYER_USER_DATA && !app.requestSingleInstanceLock()) {
   app.quit(); // the running instance gets our files via 'second-instance'
 } else {
   app.on('second-instance', (_e, argv) => {
@@ -59,11 +61,12 @@ ipcMain.handle('renderer-ready', () => {
   for (const message of pending.splice(0)) win?.webContents.send('open-file', message);
 });
 
+/** Starts the server on `port`, or the next free one. Express 5 passes listen errors to the callback. */
 function listen(port, attempts = 10) {
   return new Promise((resolve, reject) => {
-    const s = server.listen(port, '127.0.0.1', () => resolve(s.address().port));
-    s.on('error', err => {
-      if (err.code === 'EADDRINUSE' && attempts > 1) resolve(listen(port + 1, attempts - 1));
+    const s = server.listen(port, '127.0.0.1', err => {
+      if (!err) resolve(s.address().port);
+      else if (err.code === 'EADDRINUSE' && attempts > 1) resolve(listen(port + 1, attempts - 1));
       else reject(err);
     });
   });

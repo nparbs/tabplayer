@@ -33,6 +33,13 @@ const child = spawn(electronPath, [...(packaged ? [] : [root]), `--remote-debugg
 let log = '';
 child.stdout.on('data', d => { log += d; });
 child.stderr.on('data', d => { log += d; });
+// A blocked main process (e.g. an error dialog) would otherwise hang the test.
+setTimeout(() => {
+  console.log(`FAIL desktop app did not finish within 3 minutes
+${log.slice(-2000)}`);
+  child.kill();
+  process.exit(1);
+}, 180000).unref();
 
 const results = [];
 const errors = [];
@@ -44,8 +51,12 @@ try {
   let page;
   await step('app starts and shows the player', async () => {
     for (let i = 0; i < 60 && !browser; i++) {
-      try { browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null }); }
-      catch { await new Promise(r => setTimeout(r, 500)); }
+      try {
+        browser = await Promise.race([
+          puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('connect timed out')), 5000)),
+        ]);
+      } catch { await new Promise(r => setTimeout(r, 500)); }
     }
     if (!browser) throw new Error(`could not connect to Electron\n${log}`);
     for (let i = 0; i < 60 && !page; i++) {
