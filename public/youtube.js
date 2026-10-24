@@ -147,6 +147,45 @@ export class YouTubeAudio {
   }
 }
 
+/** The 11-character video id from a YouTube link (watch, youtu.be, embed, shorts, music) or a bare id. */
+export function parseYouTubeId(input) {
+  const text = String(input ?? '').trim();
+  if (/^[\w-]{11}$/.test(text)) return text;
+  let url;
+  try { url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`); } catch { return null; }
+  const host = url.hostname.replace(/^(www|m|music)\./, '');
+  let id = null;
+  if (host === 'youtu.be') id = url.pathname.slice(1).split('/')[0];
+  else if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+    id = url.searchParams.get('v') ?? /^\/(?:embed|shorts|live|v)\/([\w-]{11})/.exec(url.pathname)?.[1] ?? null;
+  }
+  return id && /^[\w-]{11}$/.test(id) ? id : null;
+}
+
+/**
+ * Seconds from the start of the song to each played bar, from the tab's own tempo
+ * (alphaTab tick lookup: { start, end, masterBar } per played bar, 960 ticks per quarter note).
+ * Used to follow a video that has no Songsterr sync points.
+ */
+export function barStartSeconds(bars, defaultTempo = 120) {
+  const out = [];
+  let time = 0, tempo = defaultTempo || 120;
+  for (const { start, end, masterBar } of bars) {
+    out.push(time);
+    const length = end - start;
+    const changes = [...(masterBar.tempoAutomations ?? [])].sort((a, b) => a.ratioPosition - b.ratioPosition);
+    let pos = 0;
+    for (const change of changes) {
+      const at = Math.max(0, Math.min(1, change.ratioPosition || 0)) * length;
+      time += ((at - pos) / 960) * (60 / tempo);
+      pos = at;
+      tempo = change.value || tempo;
+    }
+    time += ((length - pos) / 960) * (60 / tempo);
+  }
+  return out;
+}
+
 function youTubeError(code) {
   return {
     2: 'Invalid YouTube video id.',
