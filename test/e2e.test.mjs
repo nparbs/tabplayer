@@ -389,6 +389,46 @@ try {
     await page.click('#all-notes');
   });
 
+  await step('smooth playhead: follows the clock, stays with the sounding note, never steps back', async () => {
+    if (await page.evaluate(() => window.tabPlayerApi.playerState === 1)) await page.click('#play');
+    await page.evaluate(() => {
+      const api = window.tabPlayerApi;
+      api.isLooping = false;
+      const staff = api.tracks[0].staves[0];
+      const bar = staff.bars.find(b => b.index > 2 && b.voices[0].beats.filter(x => x.notes.length).length > 3) ?? staff.bars[0];
+      api.tickPosition = api.tickCache.getBeatStart(bar.voices[0].beats[0]);
+    });
+    await new Promise(r => setTimeout(r, 400));
+    await page.click('#play');
+    const frames = await page.evaluate(() => new Promise(resolve => {
+      const api = window.tabPlayerApi, el = document.querySelector('.playhead');
+      let played = null;
+      api.playedBeatChanged.on(b => { played = b; });
+      const out = [], t0 = performance.now();
+      const frame = () => {
+        const m = /translate\(([\d.]+)px, ([\d.]+)px\)/.exec(el?.style.transform || '');
+        const bb = played && api.boundsLookup.findBeat(played), nb = played?.nextBeat && api.boundsLookup.findBeat(played.nextBeat);
+        const sameLine = bb && nb && Math.abs(nb.visualBounds.y - bb.visualBounds.y) < 5 && nb.onNotesX > bb.onNotesX;
+        out.push({ x: m ? +m[1] : null, y: m ? +m[2] : null, rel: m && sameLine ? (+m[1] - bb.onNotesX) / (nb.onNotesX - bb.onNotesX) : null });
+        if (performance.now() - t0 < 2500) requestAnimationFrame(frame); else resolve(out);
+      };
+      requestAnimationFrame(frame);
+    }));
+    await page.click('#play');
+    const drawn = frames.filter(f => f.x !== null);
+    if (drawn.length < frames.length * 0.8) throw new Error(`playhead drawn in only ${drawn.length}/${frames.length} frames`);
+    const back = drawn.filter((f, i) => i && f.y === drawn[i - 1].y && f.x < drawn[i - 1].x - 0.5).length;
+    if (back) throw new Error(`playhead stepped backwards ${back} times`);
+    const rel = drawn.map(f => f.rel).filter(v => v !== null).sort((a, b) => a - b);
+    const median = rel[rel.length >> 1];
+    if (!(median > -0.1 && median < 1.1)) throw new Error(`playhead not with the sounding note (median ${median?.toFixed(2)} of the way to the next note)`);
+    if (await page.$eval('.at-cursor-beat', c => getComputedStyle(c).visibility !== 'hidden')) throw new Error("alphaTab's beat cursor still visible");
+    await page.select('#cursor-mode', 'beat');
+    const classic = await page.evaluate(() => ({ animated: window.tabPlayerApi.settings.player.enableAnimatedBeatCursor, hidden: getComputedStyle(document.querySelector('.playhead')).display === 'none' }));
+    if (!classic.animated || !classic.hidden) throw new Error(`note-to-note mode ${JSON.stringify(classic)}`);
+    await page.select('#cursor-mode', 'smooth');
+  });
+
   await step('metronome sounds and a two-bar count-in', async () => {
     await page.evaluate(() => {
       const c = window.tabPlayerClicker;

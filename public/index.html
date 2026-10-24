@@ -156,6 +156,13 @@
       </label>
       <label class="row"><span>Show all note names</span><input id="all-notes" type="checkbox"></label>
       <label class="row"><span>Left-handed</span><input id="left-handed" type="checkbox"></label>
+      <label class="row">Playhead
+        <select id="cursor-mode" title="How the playback line moves">
+          <option value="smooth">Smooth: glides through the notes</option>
+          <option value="steady">Steady: even speed through each bar</option>
+          <option value="beat">Note to note (classic)</option>
+        </select>
+      </label>
       <label class="row"><span>Multi-track view</span><input id="multi-track" type="checkbox"></label>
       <h3>Sound</h3>
       <label class="row stacked">Soundfont (synth audio)

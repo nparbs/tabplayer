@@ -275,6 +275,13 @@ body.has-score .welcome { display: none; }
 .at-cursor-bar { background: var(--cursor-bar); }
 .at-selection div { background: var(--selection); }
 .at-cursor-beat { background: var(--cursor-beat); width: 3px; }
+/* Smooth playhead (app.js) replaces alphaTab's note-to-note beat cursor. */
+body.smooth-cursor .at-cursor-beat { visibility: hidden; }
+.playhead {
+  position: absolute; left: 0; top: 0; width: 3px; margin-left: -1px; z-index: 1000; pointer-events: none;
+  background: var(--cursor-beat); border-radius: 2px; will-change: transform;
+}
+body:not(.smooth-cursor) .playhead { display: none !important; }
 .at-highlight * { fill: var(--highlight); stroke: var(--highlight); }
 
 .overlay {

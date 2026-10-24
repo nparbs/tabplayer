@@ -23,6 +23,7 @@ const ui = {
   staveProfile: $('stave-profile'), layoutMode: $('layout-mode'), zoom: $('zoom'), theme: $('theme'),
   themeToggle: $('theme-toggle'), toggleSidebar: $('toggle-sidebar'),
   instrumentView: $('instrument-view'), noteLabels: $('note-labels'), allNotes: $('all-notes'), leftHanded: $('left-handed'),
+  cursorMode: $('cursor-mode'),
   multiTrack: $('multi-track'),
   overlay: $('overlay'), overlayText: $('overlay-text'), viewport: $('viewport'), welcome: $('welcome'),
   fretboard: $('fretboard'),
@@ -79,7 +80,7 @@ const store = {
 // View settings are remembered for every song (and shared between browser tabs).
 const VIEW_DEFAULTS = {
   staveProfile: 'Tab', layoutMode: 'Page', zoom: '1', multiTrack: false,
-  instrument: 'auto', noteLabels: 'fret', allNotes: false, leftHanded: false,
+  instrument: 'auto', noteLabels: 'fret', allNotes: false, leftHanded: false, cursor: 'smooth',
 };
 function loadView() {
   let saved = {};
@@ -88,6 +89,7 @@ function loadView() {
   const view = { ...VIEW_DEFAULTS, ...saved };
   if (![...ui.instrumentView.options].some(o => o.value === view.instrument)) view.instrument = VIEW_DEFAULTS.instrument;
   if (![...ui.noteLabels.options].some(o => o.value === view.noteLabels)) view.noteLabels = VIEW_DEFAULTS.noteLabels;
+  if (![...ui.cursorMode.options].some(o => o.value === view.cursor)) view.cursor = VIEW_DEFAULTS.cursor;
   if (at.StaveProfile[view.staveProfile] === undefined) view.staveProfile = VIEW_DEFAULTS.staveProfile;
   if (at.LayoutMode[view.layoutMode] === undefined) view.layoutMode = VIEW_DEFAULTS.layoutMode;
   if (![...ui.zoom.options].some(o => o.value === String(view.zoom))) view.zoom = VIEW_DEFAULTS.zoom;
@@ -97,7 +99,7 @@ function saveView() {
   store.set('view', JSON.stringify({
     staveProfile: ui.staveProfile.value, layoutMode: ui.layoutMode.value, zoom: ui.zoom.value,
     multiTrack: ui.multiTrack.checked, instrument: ui.instrumentView.value,
-    noteLabels: ui.noteLabels.value, allNotes: ui.allNotes.checked, leftHanded: ui.leftHanded.checked,
+    noteLabels: ui.noteLabels.value, allNotes: ui.allNotes.checked, leftHanded: ui.leftHanded.checked, cursor: ui.cursorMode.value,
   }));
 }
 function showViewControls(view) {
@@ -109,6 +111,8 @@ function showViewControls(view) {
   ui.noteLabels.value = view.noteLabels;
   ui.allNotes.checked = !!view.allNotes;
   ui.leftHanded.checked = !!view.leftHanded;
+  ui.cursorMode.value = view.cursor;
+  document.body.classList.toggle('smooth-cursor', view.cursor !== 'beat');
   document.body.classList.toggle('at-horizontal', view.layoutMode === 'Horizontal');
   showInstrumentPanel();
 }
@@ -200,7 +204,7 @@ const api = new at.AlphaTabApi($('alphaTab'), {
     soundFont: SOUNDFONTS[sound.id].url,
     scrollElement: ui.viewport,
     enableCursor: true,
-    enableAnimatedBeatCursor: true,
+    enableAnimatedBeatCursor: initialView.cursor === 'beat', // otherwise the smooth playhead (below) replaces it
     enableUserInteraction: true,
     scrollOffsetY: -40,
   },
@@ -2300,6 +2304,142 @@ function drawPiano(ctx, w, h, v, track, notes) {
 
 function dot(ctx, x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
 
+// ---------- smooth playhead ----------
+// alphaTab's beat cursor hops from note to note, starting a new CSS slide whenever a position update reports
+// a new beat, so it stutters. This playhead is driven by the clock: every frame it follows the player's position
+// (carried forward between updates at the current tempo). Small timing errors are eased out; seeks and loop
+// jumps snap. "Smooth" lays its path through the notes, so it reaches each note exactly as it sounds (notes are
+// not spaced in proportion to time); "Steady" moves at an even speed through each bar.
+const playhead = {
+  el: Object.assign(document.createElement('div'), { className: 'playhead' }),
+  bars: new Map(),    // master bar index -> { mb (bounds), x0, x1, anchors: [[tickInBar, x], ...] }
+  base: null,         // last position update: { tick, at, perMs, endTick }
+  shown: null,        // tick currently drawn
+  frameAt: 0,
+  raf: 0,
+  lookup: 0,          // index into the tick lookup, to start the search from
+};
+const SNAP_MS = 250;
+const smoothCursor = () => ui.cursorMode.value !== 'beat';
+const isPlaying = () => api.playerState === at.synth.PlayerState.Playing;
+
+/** Where each bar's time maps on the page: from its first note to the next bar's first note (or the bar's end). */
+function indexPlayheadBars() {
+  playhead.bars = new Map();
+  const systems = api.boundsLookup?.staffSystems ?? [];
+  const firstX = mb => {
+    let x = Infinity;
+    for (const b of mb.bars) for (const bb of b.beats) x = Math.min(x, bb.onNotesX);
+    return Number.isFinite(x) ? x : mb.visualBounds.x + 8;
+  };
+  for (const system of systems) {
+    system.bars.forEach((mb, i) => {
+      const next = system.bars[i + 1];
+      const x0 = firstX(mb);
+      const x1 = Math.max(x0 + 1, next ? firstX(next) : mb.visualBounds.x + mb.visualBounds.w - 6);
+      // Note onsets in the bar (all shown tracks), earliest x per onset, kept left to right.
+      const byTick = new Map();
+      for (const b of mb.bars) for (const bb of b.beats) {
+        const t = bb.beat.playbackStart;
+        byTick.set(t, Math.min(byTick.get(t) ?? Infinity, bb.onNotesX));
+      }
+      const anchors = [];
+      for (const [t, x] of [...byTick].sort((p, q) => p[0] - q[0])) {
+        if (!anchors.length || x > anchors[anchors.length - 1][1]) anchors.push([t, x]);
+      }
+      if (!anchors.length || anchors[0][0] > 0) anchors.unshift([0, x0]);
+      playhead.bars.set(mb.index, { mb, x0, x1, anchors });
+    });
+  }
+}
+
+/** x for a position inside a bar: through the note onsets ("Smooth") or evenly ("Steady"). */
+function playheadX(place, tickInBar, barTicks) {
+  if (ui.cursorMode.value === 'steady') return place.x0 + (place.x1 - place.x0) * Math.max(0, Math.min(1, tickInBar / barTicks));
+  const a = place.anchors;
+  let i = 0;
+  while (i < a.length - 1 && a[i + 1][0] <= tickInBar) i++;
+  const [t0, xa] = a[i];
+  const [t1, xb] = i + 1 < a.length ? a[i + 1] : [barTicks, place.x1];
+  return xa + (xb - xa) * Math.max(0, Math.min(1, (tickInBar - t0) / Math.max(1, t1 - t0)));
+}
+
+/** The played bar (in playback order, so repeats work) containing a tick. */
+function lookupBar(tick) {
+  const list = api.tickCache?.masterBars;
+  if (!list?.length) return null;
+  let i = Math.min(playhead.lookup, list.length - 1);
+  if (tick < list[i].start) { while (i > 0 && tick < list[i].start) i--; } else { while (i < list.length - 1 && tick >= list[i].end) i++; }
+  playhead.lookup = i;
+  return list[i];
+}
+
+function drawPlayhead(tick) {
+  const el = playhead.el;
+  const host = $('alphaTab');
+  const hit = smoothCursor() && state.score && tick !== null ? lookupBar(tick) : null;
+  const place = hit && playhead.bars.get(hit.masterBar.index);
+  if (!place) { el.style.display = 'none'; return; }
+  const barTicks = Math.max(1, hit.end - hit.start);
+  const x = playheadX(place, Math.max(0, Math.min(barTicks, tick - hit.start)), barTicks);
+  const box = place.mb.visualBounds;
+  el.style.display = '';
+  el.style.height = `${box.h}px`;
+  el.style.transform = `translate(${x}px, ${box.y}px)`;
+  if (el.parentElement !== host) host.appendChild(el);
+}
+
+/** The position now, carried forward from the last update at the playing tempo. */
+function projectedTick(now) {
+  const b = playhead.base;
+  if (!b) return null;
+  // Hold still after pressing play until the audio actually starts moving (avoids a run-up and snap back).
+  const moving = isPlaying() && !playhead.starting;
+  let tick = b.tick + (moving ? Math.min(now - b.at, 300) * b.perMs : 0);
+  const range = api.isLooping ? api.playbackRange : null;
+  if (range && b.tick <= range.endTick) tick = Math.min(tick, range.endTick);
+  return Math.min(tick, b.endTick || Infinity);
+}
+
+function playheadFrame(now) {
+  playhead.raf = 0;
+  const target = projectedTick(now);
+  if (target === null) return;
+  const dt = playhead.frameAt ? now - playhead.frameAt : 0;
+  playhead.frameAt = now;
+  const perMs = playhead.base.perMs;
+  let shown = playhead.shown;
+  if (shown === null || !isPlaying() || Math.abs(target - shown) > SNAP_MS * perMs) {
+    shown = target; // paused, seek, loop jump or first frame
+  } else {
+    // Move with the clock, ease towards the reported position, and never step backwards (wait instead).
+    const next = shown + dt * perMs;
+    shown = Math.max(shown, next + (target - next) * 0.15);
+  }
+  playhead.shown = shown;
+  drawPlayhead(shown);
+  if (isPlaying() && smoothCursor()) playhead.raf = requestAnimationFrame(playheadFrame);
+}
+function kickPlayhead() {
+  if (!playhead.raf) playhead.raf = requestAnimationFrame(playheadFrame);
+}
+
+function onPlayheadPosition(e) {
+  if (playhead.starting && e.currentTick !== playhead.starting.tick) playhead.starting = null;
+  playhead.base = { tick: e.currentTick, at: performance.now(), perMs: ((e.modifiedTempo || 120) / 60) * 960 / 1000, endTick: e.endTick };
+  if (e.isSeek) playhead.shown = null;
+  kickPlayhead();
+}
+
+function applyCursorMode() {
+  const smooth = smoothCursor();
+  document.body.classList.toggle('smooth-cursor', smooth);
+  api.settings.player.enableAnimatedBeatCursor = !smooth;
+  api.updateSettings();
+  playhead.shown = null;
+  if (smooth) kickPlayhead(); else playhead.el.style.display = 'none';
+}
+
 // ---------- alphaTab events ----------
 api.renderStarted.on(() => { state.rendering = true; showOverlay('Rendering…'); });
 api.renderFinished.on(() => { hideOverlay(); updateTrackHighlight(); });
@@ -2309,6 +2449,9 @@ api.postRenderFinished.on(() => {
   if (state.queuedTab) showQueuedTab();
   else if (state.editRenderPending) renderEditedTab();
   drawEditCursor();
+  indexPlayheadBars();
+  playhead.shown = null;
+  kickPlayhead();
 });
 function onScoreLoaded(score) {
   state.score = score;
@@ -2362,6 +2505,9 @@ api.playerReady.on(() => { setPlayerEnabled(true); if (!youtube.active) setStatu
 api.playerStateChanged.on(e => {
   const playing = e.state === at.synth.PlayerState.Playing;
   ui.play.textContent = playing ? '⏸' : '▶';
+  playhead.frameAt = 0;
+  playhead.starting = playing && playhead.base ? { tick: playhead.base.tick } : null;
+  kickPlayhead();
 });
 api.playerPositionChanged.on(e => {
   if (!state.score) return; // the last song stopping after an empty tab was opened
@@ -2370,6 +2516,7 @@ api.playerPositionChanged.on(e => {
   ui.timeTotal.textContent = fmtTime(e.endTime);
   if (!state.seeking && e.endTime > 0) ui.seek.value = Math.round((e.currentTime / e.endTime) * 1000);
   scheduleClicks(e);
+  onPlayheadPosition(e);
 });
 api.activeBeatsChanged.on(e => { state.activeBeats = e.activeBeats; drawFretboard(); });
 api.playedBeatChanged.on(beat => { showBar(beat?.voice.bar.masterBar); highlightChord(beat); });
@@ -2485,6 +2632,7 @@ window.addEventListener('storage', e => {
   if (e.key === 'tabplayer.view') {
     showViewControls(loadView());
     applyScoreView();
+    applyCursorMode();
     if (!ui.multiTrack.checked && state.score && state.selected.size > 1) { state.selected = new Set([state.activeTrack]); renderSelected(); }
     drawFretboard();
     renderChords();
@@ -2506,6 +2654,7 @@ ui.toggleSidebar.addEventListener('click', () => {
   else document.body.classList.toggle('sidebar-collapsed');
 });
 ui.instrumentView.addEventListener('change', () => { showInstrumentPanel(); saveView(); relayout(); });
+ui.cursorMode.addEventListener('change', () => { saveView(); applyCursorMode(); });
 for (const el of [ui.noteLabels, ui.allNotes, ui.leftHanded]) {
   el.addEventListener('change', () => { saveView(); drawFretboard(); renderChords(); });
 }
