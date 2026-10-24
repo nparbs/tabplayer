@@ -1,0 +1,27 @@
+{
+  "name": "TabPlayer",
+  "short_name": "TabPlayer",
+  "description": "Guitar Pro-style tab player and editor with Songsterr import",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#16181d",
+  "theme_color": "#1f2228",
+  "categories": ["music", "education"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "file_handlers": [
+    {
+      "action": "/",
+      "accept": {
+        "application/x-guitar-pro": [".gp", ".gpx", ".gp3", ".gp4", ".gp5", ".gp7", ".gp8"],
+        "application/vnd.recordare.musicxml": [".musicxml", ".mxl"]
+      }
+    }
+  ]
+}
