@@ -18,17 +18,22 @@ if (!executablePath) { console.log('SKIP: no Chrome/Edge found (set CHROME_PATH)
 
 const server = app.listen(0);
 const port = server.address().port;
-const browser = await puppeteer.launch({ executablePath, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+const args = ['--autoplay-policy=no-user-gesture-required'];
+if (process.env.CI) args.push('--no-sandbox'); // GitHub's Linux runners can't use Chrome's sandbox
+const browser = await puppeteer.launch({ executablePath, headless: true, args });
 const page = await browser.newPage();
 await page.setViewport({ width: 1400, height: 900 });
 const errors = [];
-page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
+page.on('pageerror', e => errors.push(`pageerror: ${e.stack}`));
 page.on('console', m => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
+page.on('dialog', d => d.accept()); // e.g. the "leave with unsaved edits?" prompt
 
 const results = [];
 async function step(name, fn) {
+  const n0 = errors.length;
   try { await fn(); results.push(`PASS ${name}`); }
   catch (e) { results.push(`FAIL ${name}: ${e.message}`); }
+  if (process.env.E2E_DEBUG && errors.length > n0) results.push(`  ^ ${errors.length - n0} browser error(s) during this step`);
 }
 const shotDir = path.join(os.tmpdir(), 'tabplayer-e2e');
 fs.mkdirSync(shotDir, { recursive: true });
@@ -266,6 +271,26 @@ try {
     if (!(await page.$eval('#video-panel', e => e.classList.contains('hidden')))) throw new Error('video panel still visible');
   });
 
+  await step('your own YouTube video, synced to the tab tempo', async () => {
+    const videoId = await page.evaluate(() => window.tabPlayerYouTube.video?.videoId);
+    await page.select('#audio-source', 'custom');
+    if (await page.$eval('#custom-video', e => e.classList.contains('hidden'))) throw new Error('link form not shown');
+    await page.type('#custom-video-url', `https://www.youtube.com/watch?v=${videoId}`);
+    await page.click('#custom-video button[type=submit]');
+    await page.waitForFunction(() => window.tabPlayerYouTube.active && window.tabPlayerYouTube.video?.custom, { timeout: 45000 });
+    const info = await page.evaluate(() => ({
+      points: window.tabPlayerYouTube.video.points.length,
+      bars: window.tabPlayerApi.tickCache.masterBars.length,
+      syncEnabled: !document.getElementById('custom-video-sync').disabled,
+      saved: Object.values(JSON.parse(localStorage.getItem('tabplayer.customVideos') || '{}')).length,
+    }));
+    if (info.points !== info.bars || !info.syncEnabled || !info.saved) throw new Error(JSON.stringify(info));
+    await page.click('#custom-video-sync');
+    if (!/Synced/.test(await page.$eval('#status', e => e.textContent))) throw new Error('sync button did nothing');
+    await page.select('#audio-source', 'synth');
+    await page.waitForFunction(() => !window.tabPlayerYouTube.active && window.tabPlayerApi.isReadyForPlayback, { timeout: 60000 });
+  });
+
   await step('load an older revision', async () => {
     const target = await page.evaluate(() => {
       const sel = document.getElementById('revision');
@@ -310,6 +335,302 @@ try {
     await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Opened'), { timeout: 30000 });
     await page.waitForFunction(() => document.getElementById('overlay').classList.contains('hidden'), { timeout: 30000 });
     await page.screenshot({ path: path.join(shotDir, 'reopened.png') });
+  });
+
+  await step('transpose and capo per track and for the whole song', async () => {
+    const i = await page.$eval('.track .capo', el => Number(el.closest('.track').dataset.index)); // a guitar or bass track
+    const pitch = () => page.evaluate(i => {
+      const s = window.tabPlayerApi.score.tracks[i].staves[0];
+      return { tp: s.transpositionPitch, capo: s.capo, sub: document.querySelector(`.track[data-index="${i}"] .track-sub`).textContent, song: document.getElementById('song-transpose').value };
+    }, i);
+    const before = await pitch();
+    await page.select(`.track[data-index="${i}"] .transpose`, '2');
+    const up = await pitch();
+    if (up.tp !== before.tp - 2) throw new Error(`transpose ${JSON.stringify([before, up])}`);
+    await page.select('#song-transpose', '0');
+    if ((await pitch()).tp !== before.tp) throw new Error('song transpose did not reset the track');
+    await page.select(`.track[data-index="${i}"] .capo`, '3');
+    const capo = await pitch();
+    if (capo.capo !== 3 || !capo.sub.includes('Capo 3')) throw new Error(`capo ${JSON.stringify(capo)}`);
+    await page.select(`.track[data-index="${i}"] .capo`, String(before.capo));
+    await page.click(`.track[data-index="${i}"] .track-name`); // show it on the fretboard and in the chord panel
+  });
+
+  await step('chord diagrams for the track, click jumps to the chord', async () => {
+    const withChords = await page.evaluate(() => window.tabPlayerApi.score.tracks.findIndex(t =>
+      !t.staves[0].isPercussion && t.staves[0].bars.some(b => b.voices[0].beats.some(x => x.chord))));
+    if (withChords >= 0) await page.click(`.track[data-index="${withChords}"] .track-name`);
+    const info = await page.evaluate(() => ({
+      shown: !document.getElementById('chords-section').classList.contains('hidden'),
+      chords: document.querySelectorAll('#chord-panel .chord').length,
+      diagrams: document.querySelectorAll('#chord-panel .chord svg').length,
+      named: [...window.tabPlayerApi.score.tracks].some(t => t.staves[0].bars.some(b => b.voices[0].beats.some(x => x.chord))),
+    }));
+    if (!info.named) { results.push('  (no chord symbols in this song: chord panel not checked)'); return; }
+    if (!info.shown || !info.chords) throw new Error(JSON.stringify(info));
+    const tick0 = await page.evaluate(() => window.tabPlayerApi.tickPosition);
+    await page.click('#chord-panel .chord:last-child');
+    const tick1 = await page.evaluate(() => window.tabPlayerApi.tickPosition);
+    if (tick1 === tick0) throw new Error('clicking a chord did not move the playhead');
+  });
+
+  await step('bottom panel: piano keyboard, left-handed, note names', async () => {
+    for (const [sel, val] of [['#instrument-view', 'piano'], ['#note-labels', 'name']]) await page.select(sel, val);
+    await page.click('#left-handed');
+    await page.click('#all-notes');
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('tabplayer.view')));
+    if (saved.instrument !== 'piano' || saved.noteLabels !== 'name' || !saved.leftHanded || !saved.allNotes) throw new Error(JSON.stringify(saved));
+    await page.screenshot({ path: path.join(shotDir, 'piano.png') });
+    await page.select('#instrument-view', 'fretboard');
+    await page.screenshot({ path: path.join(shotDir, 'lefty-fretboard.png') });
+    await page.select('#instrument-view', 'auto');
+    await page.select('#note-labels', 'fret');
+    await page.click('#left-handed');
+    await page.click('#all-notes');
+  });
+
+  await step('metronome sounds and a two-bar count-in', async () => {
+    await page.evaluate(() => {
+      const c = window.tabPlayerClicker;
+      c.count = 0;
+      const play = c.play.bind(c);
+      c.play = (...a) => { c.count++; return play(...a); };
+    });
+    if (await page.evaluate(() => window.tabPlayerApi.playerState === 1)) await page.click('#play');
+    await page.evaluate(() => { window.tabPlayerApi.isLooping = false; window.tabPlayerApi.tickPosition = 0; });
+    await page.select('#metro-sound', 'woodblock');
+    if (!(await page.$eval('#metronome', b => b.classList.contains('on')))) await page.click('#metronome');
+    if (await page.evaluate(() => window.tabPlayerApi.metronomeVolume) !== 0) throw new Error('synth metronome should be off with a custom sound');
+    await page.click('#play');
+    await new Promise(r => setTimeout(r, 2500));
+    await page.click('#play');
+    const metroClicks = await page.evaluate(() => window.tabPlayerClicker.count);
+    if (metroClicks < 2) throw new Error(`only ${metroClicks} metronome clicks in 2.5 s`);
+    await page.click('#metronome');
+    await page.select('#metro-sound', 'synth');
+    // Count-in: clicks first, then playback starts.
+    await page.select('#count-in-bars', '2');
+    await page.click('#count-in');
+    await page.evaluate(() => { window.tabPlayerClicker.count = 0; });
+    await page.click('#play');
+    const during = await page.evaluate(() => ({ playing: window.tabPlayerApi.playerState === 1, clicks: window.tabPlayerClicker.count, status: document.getElementById('status').textContent }));
+    if (during.playing || !/Count-in/.test(during.status) || during.clicks < 4) throw new Error(`count-in ${JSON.stringify(during)}`);
+    await page.waitForFunction(() => window.tabPlayerApi.playerState === 1, { timeout: 15000 });
+    await page.click('#play');
+    await page.click('#count-in');
+  });
+
+  await step('export the looped bars as WAV', async () => {
+    await page.evaluate(() => {
+      window.__downloads = [];
+      HTMLAnchorElement.prototype.click = function () {
+        const name = this.download;
+        fetch(this.href).then(r => r.arrayBuffer()).then(b => window.__downloads.push({ name, size: b.byteLength, head: String.fromCharCode(...new Uint8Array(b, 0, 4)) }));
+      };
+      document.getElementById('loop-from').value = '1';
+      document.getElementById('loop-to').value = '2';
+    });
+    await page.click('#loop-apply');
+    await page.click('#export-wav');
+    await page.waitForFunction(() => window.__downloads.length > 0, { timeout: 60000 });
+    const d = await page.evaluate(() => window.__downloads[0]);
+    if (d.head !== 'RIFF' || !d.name.endsWith('.wav') || d.size < 44100 * 4) throw new Error(JSON.stringify(d));
+    await page.click('#loop-clear');
+  });
+
+  await step('edit: frets, techniques, lengths, bars, undo / redo, tempo, save', async () => {
+    const ctrl = async key => { await page.keyboard.down('Control'); await page.keyboard.press(key); await page.keyboard.up('Control'); };
+    const shown = () => page.evaluate(() => {
+      const api = window.tabPlayerApi, pos = document.getElementById('edit-pos').textContent;
+      const m = /Bar (\d+)\/(\d+) · Beat (\d+)/.exec(pos);
+      const [bar, , beat] = m ? [Number(m[1]) - 1, 0, Number(m[3]) - 1] : [0, 0, 0];
+      const track = api.tracks.find(t => document.querySelector(`.track.active[data-index="${t.index}"]`)) ?? api.tracks[0];
+      const b = track.staves[0].bars[bar]?.voices[0].beats[beat];
+      return { pos, bars: api.score.masterBars.length, notes: b?.notes.map(n => [n.string, n.fret, n.isPalmMute]), duration: b?.duration, rest: b?.isRest };
+    });
+    const settle = () => page.waitForFunction(() => document.getElementById('overlay').classList.contains('hidden'), { timeout: 30000 })
+      .then(() => new Promise(r => setTimeout(r, 400)));
+    await page.click(`.track[data-index="${await page.$eval('.track .capo', el => el.closest('.track').dataset.index)}"] .track-name`);
+    await settle();
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('e');
+    if (await page.$eval('#edit-bar', e => e.classList.contains('hidden'))) throw new Error('edit toolbar not shown');
+    const bars0 = (await shown()).bars;
+    await ctrl('Insert'); // a new, empty bar after the current one
+    await settle();
+    let now = await shown();
+    if (now.bars !== bars0 + 1 || !now.rest) throw new Error(`insert bar ${JSON.stringify(now)}`);
+    await page.keyboard.press('1'); await page.keyboard.press('2'); // fret 12 on the top string
+    await settle();
+    await page.keyboard.press('h'); // no next note to hammer on to: refused with a message
+    if (!/next note/.test(await page.$eval('#status', e => e.textContent))) throw new Error('no hint for a lone hammer-on');
+    await page.keyboard.press('p'); // palm mute
+    await page.keyboard.press('-'); // whole -> half
+    await settle();
+    now = await shown();
+    if (now.notes?.[0]?.[1] !== 12 || !now.notes[0][2] || now.duration !== 2) throw new Error(`typed ${JSON.stringify(now)}`);
+    if (!(await page.$eval('#tabbar .tab.active', t => !!t.querySelector('.tab-dirty')))) throw new Error('tab not marked as edited');
+    if (!(await page.$('.edit-cursor')) || !(await page.$('.edit-string'))) throw new Error('edit cursor not drawn');
+    await ctrl('z'); await settle(); await ctrl('z'); await settle(); await ctrl('z'); await settle();
+    now = await shown();
+    if (!now.rest || now.bars !== bars0 + 1) throw new Error(`undo ${JSON.stringify(now)}`);
+    await ctrl('y'); await settle();
+    if ((await shown()).notes?.[0]?.[1] !== 12) throw new Error('redo did not bring the note back');
+    // bar properties
+    await page.$eval('#edit-tempo', el => { el.value = '150'; el.dispatchEvent(new Event('change')); });
+    await settle();
+    const tempo = await page.evaluate(() => {
+      const bar = Number(/Bar (\d+)/.exec(document.getElementById('edit-pos').textContent)[1]) - 1;
+      return window.tabPlayerApi.score.masterBars[bar].tempoAutomations[0]?.value;
+    });
+    if (tempo !== 150) throw new Error(`tempo ${tempo}`);
+    await page.select('#edit-repeat', '2');
+    await settle();
+    await page.keyboard.press('u'); // triplet
+    await settle();
+    const bar = await page.evaluate(() => {
+      const pos = document.getElementById('edit-pos').textContent;
+      const i = Number(/Bar (\d+)/.exec(pos)[1]) - 1, beat = Number(/Beat (\d+)/.exec(pos)[1]) - 1;
+      const api = window.tabPlayerApi;
+      const track = api.score.tracks[[...document.querySelectorAll('.track')].findIndex(li => li.classList.contains('active'))];
+      return { repeat: api.score.masterBars[i].repeatCount, tuplet: track.staves[0].bars[i].voices[0].beats[beat].tupletNumerator };
+    });
+    if (bar.repeat !== 2 || bar.tuplet !== 3) throw new Error(`repeat / triplet ${JSON.stringify(bar)}`);
+    // clicking a note in the score selects it
+    const pt = await page.evaluate(() => {
+      const api = window.tabPlayerApi;
+      const beat = api.tracks[0].staves[0].bars.flatMap(b => b.voices[0].beats).find(b => b.notes.length && b.voice.bar.index > 2);
+      const bb = api.boundsLookup.findBeat(beat), r = document.getElementById('alphaTab').getBoundingClientRect();
+      bb && document.getElementById('viewport').scrollTo(0, bb.visualBounds.y - 100);
+      const r2 = document.getElementById('alphaTab').getBoundingClientRect();
+      return bb && { x: r2.left + bb.visualBounds.x + 3, y: r2.top + bb.visualBounds.y + bb.visualBounds.h / 2, bar: beat.voice.bar.index + 1, beat: beat.index + 1 };
+    });
+    if (pt) {
+      await page.mouse.click(pt.x, pt.y);
+      const pos = (await shown()).pos;
+      if (!pos.includes(`Bar ${pt.bar}/`) || !pos.includes(`Beat ${pt.beat}/`)) throw new Error(`click selected ${pos}, expected bar ${pt.bar} beat ${pt.beat}`);
+    }
+    // save: downloads a .gp and clears the edited mark
+    const before = await page.evaluate(() => window.__downloads.length);
+    await ctrl('s');
+    await page.waitForFunction(n => window.__downloads.length > n, { timeout: 15000 }, before);
+    const d = await page.evaluate(() => window.__downloads[window.__downloads.length - 1]);
+    if (!d.name.endsWith('.gp') || d.head !== 'PK\u0003\u0004') throw new Error(JSON.stringify(d));
+    if (await page.$eval('#tabbar .tab.active', t => !!t.querySelector('.tab-dirty'))) throw new Error('still marked as edited after saving');
+    await page.keyboard.press('Escape');
+    if (!(await page.$eval('#edit-bar', e => e.classList.contains('hidden')))) throw new Error('Esc did not stop editing');
+  });
+
+  await step('edit tracks: add, rename, retune, remove, undo', async () => {
+    const settle = () => page.waitForFunction(() => document.getElementById('overlay').classList.contains('hidden'), { timeout: 30000 })
+      .then(() => new Promise(r => setTimeout(r, 400)));
+    const tracks = () => page.evaluate(() => window.tabPlayerApi.score.tracks.map(t => ({ name: t.name, tuning: t.staves[0].tuning.join(',') })));
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('e');
+    const before = await tracks();
+    await page.select('#edit-add-track', 'bass');
+    await settle();
+    let now = await tracks();
+    if (now.length !== before.length + 1 || now[now.length - 1].tuning !== '43,38,33,28') throw new Error(`add ${JSON.stringify(now.slice(-1))}`);
+    const added = now.length - 1;
+    if (!(await page.$eval(`.track[data-index="${added}"]`, li => li.classList.contains('active')))) throw new Error('new track not shown');
+    await page.$eval(`.track[data-index="${added}"] .track-rename`, el => { el.value = 'My bass'; el.dispatchEvent(new Event('change')); });
+    await settle();
+    await page.select(`.track[data-index="${added}"] .track-tuning`, await page.$eval(`.track[data-index="${added}"] .track-tuning`,
+      sel => [...sel.options].find(o => o.textContent === 'Bass drop D').value));
+    await settle();
+    now = await tracks();
+    if (now[added].name !== 'My bass' || now[added].tuning !== '43,38,33,26') throw new Error(`rename/retune ${JSON.stringify(now[added])}`);
+    await page.click(`.track[data-index="${added}"] .track-remove`); // confirm() is accepted by the dialog handler
+    await settle();
+    if ((await tracks()).length !== before.length) throw new Error('remove did not remove the track');
+    await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control');
+    await settle();
+    now = await tracks();
+    if (now.length !== before.length + 1 || now[added].name !== 'My bass') throw new Error(`undo remove ${JSON.stringify(now.slice(-1))}`);
+    // put the song back as it was, then stop editing (keeps the later tab tests simple)
+    for (let i = 0; i < 3; i++) { await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control'); await settle(); }
+    if ((await tracks()).length !== before.length) throw new Error('undo did not remove the added track');
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => { if (document.querySelector('#tabbar .tab.active .tab-dirty')) document.getElementById('export-gp').click(); });
+  });
+
+  await step('tabs: several songs open at once, switch keeps each song', async () => {
+    const info = () => page.evaluate(() => ({
+      tabs: [...document.querySelectorAll('#tabbar .tab')].map(t => t.querySelector('.tab-title').textContent),
+      active: [...document.querySelectorAll('#tabbar .tab')].findIndex(t => t.classList.contains('active')),
+      title: window.tabPlayerApi.score?.title,
+    }));
+    const before = await info();
+    if (before.tabs.length < 2) throw new Error(`expected several tabs, got ${JSON.stringify(before)}`);
+    await page.click('#tabbar .tab:first-child .tab-title');
+    await page.waitForFunction(t => window.tabPlayerApi.score?.title !== t, { timeout: 30000 }, before.title);
+    await page.waitForFunction(() => document.getElementById('overlay').classList.contains('hidden'), { timeout: 30000 });
+    const after = await info();
+    if (after.active !== 0 || after.title !== after.tabs[0]) throw new Error(`switch: ${JSON.stringify(after)}`);
+    await page.click(`#tabbar .tab:nth-child(${before.active + 1}) .tab-title`);
+    await page.waitForFunction(t => window.tabPlayerApi.score?.title === t, { timeout: 30000 }, before.title);
+    // An empty tab shows the welcome screen; going back brings the song (and its track list) back.
+    await page.click('#tabbar .tab-new');
+    if (await page.evaluate(() => document.body.classList.contains('has-score') || !document.getElementById('play').disabled)) throw new Error('empty tab still shows a song');
+    await page.click(`#tabbar div.tab:nth-of-type(${before.active + 1}) .tab-title`);
+    await page.waitForFunction(() => document.body.classList.contains('has-score') && document.querySelectorAll('#track-list .track').length > 0, { timeout: 30000 });
+    await page.click('#tabbar div.tab:last-of-type .tab-close'); // the empty tab
+  });
+
+  await step('favourite and save a song; library lists them', async () => {
+    await page.click('#tabbar .tab:first-child .tab-title');
+    await page.waitForFunction(() => document.body.classList.contains('has-score') && !document.getElementById('fav-toggle').disabled, { timeout: 30000 });
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('f');
+    await page.waitForFunction(() => document.querySelector('#tabbar .tab.active .tab-fav'), { timeout: 5000 });
+    await page.click('#save-toggle');
+    await page.waitForFunction(() => document.getElementById('save-toggle').classList.contains('on'), { timeout: 5000 });
+    await page.click('#library-btn');
+    const lists = await page.evaluate(() => Object.fromEntries(['favorites', 'saved', 'recent'].map(s =>
+      [s, document.querySelectorAll(`#library-panel .lib-item[data-section="${s}"]`).length])));
+    if (!lists.favorites || !lists.saved || lists.recent < 2) throw new Error(JSON.stringify(lists));
+    const saved = await page.evaluate(() => new Promise(resolve => {
+      const open = indexedDB.open('tabplayer');
+      open.onsuccess = () => {
+        const all = open.result.transaction('songs').objectStore('songs').getAll();
+        all.onsuccess = () => resolve(all.result.filter(r => r.saved).map(r => ({ kind: r.kind, hasData: !!(r.data || r.bytes) })));
+      };
+    }));
+    if (!saved.length || !saved.every(r => r.hasData)) throw new Error(`saved records ${JSON.stringify(saved)}`);
+    await page.keyboard.press('Escape');
+  });
+
+  await step('open tabs come back after a reload; closing a tab', async () => {
+    const count = () => page.$$eval('#tabbar .tab', t => t.length);
+    const before = await count();
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.waitForFunction(() => document.body.classList.contains('has-score'), { timeout: 60000 });
+    if (await count() !== before) throw new Error(`had ${before} tabs, restored ${await count()}`);
+    if (!(await page.$('#tabbar .tab.active .tab-fav'))) throw new Error('favourite star not restored');
+    await page.click('#tabbar div.tab:last-of-type .tab-close');
+    if (await count() !== before - 1) throw new Error('tab did not close');
+  });
+
+  await step('offline web app: installable, starts and plays with no server or network', async () => {
+    const manifest = await page.evaluate(() => fetch('/manifest.webmanifest').then(r => r.json()));
+    if (manifest.display !== 'standalone' || !manifest.icons.some(i => i.sizes === '512x512')) throw new Error('manifest incomplete');
+    await page.waitForFunction(() => navigator.serviceWorker?.controller, { timeout: 30000 });
+    const errorsBefore = errors.length;
+    await page.setOfflineMode(true); // blocks the local server too, as if it weren't running
+    try {
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForFunction(() => document.body.classList.contains('has-score') && window.tabPlayerApi.isReadyForPlayback, { timeout: 60000 });
+      const info = await page.evaluate(() => ({ title: window.tabPlayerApi.score.title, offline: document.body.classList.contains('offline') }));
+      if (!info.title) throw new Error('no song after an offline start');
+      await page.click('#play');
+      await page.waitForFunction(() => window.tabPlayerApi.timePosition > 300, { timeout: 20000 });
+      await page.click('#play');
+    } finally {
+      await page.setOfflineMode(false);
+      // Failed requests while offline (YouTube API, search) are expected.
+      errors.splice(errorsBefore, errors.length - errorsBefore, ...errors.slice(errorsBefore).filter(e => !/ERR_INTERNET_DISCONNECTED|Failed to fetch|youtube|net::/i.test(e)));
+    }
   });
 
   await step('no browser errors', async () => {

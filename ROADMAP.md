@@ -14,7 +14,7 @@ The goal is to get as close to Guitar Pro as practical in a browser app. Status:
 - ✅ Keyboard shortcuts
 - ✅ Converter + browser test suites
 
-## v0.2: Import fidelity, YouTube audio, themes (current)
+## v0.2: Import fidelity, YouTube audio, themes
 
 - ✅ Repeats from Songsterr (`repeatStart` / `repeat` on any track; verified against video sync points)
 - 🚧 Alternate endings: mapped if present, but no Songsterr song using them has been found to verify
@@ -34,35 +34,43 @@ The goal is to get as close to Guitar Pro as practical in a browser app. Status:
 
 - ✅ Speed trainer: loop that increases tempo by N% each pass (or every N passes) up to a top speed
 - ✅ A/B loop markers by bar number, saved per song
-- ⬜ Count-in length and metronome sound options
-- ⬜ Per-track transpose, and capo for playback
-- ⬜ Chord diagrams panel
-- ⬜ Piano keyboard view (alongside the fretboard)
-- ⬜ Left-handed fretboard and a fretboard note-name overlay
-- ⬜ Recently opened songs and favourites (local storage)
-- ⬜ Export audio (WAV) via alphaTab's audio exporter
+- ✅ Count-in length (1–2 bars, works with YouTube audio) and metronome sounds with an accented first beat
+- ✅ Per-track and whole-song transpose, and per-track capo for playback
+- ✅ Chord diagrams panel (file fingerings, or suggested shapes from chord names), highlights the current chord
+- ✅ Piano keyboard view (automatic for non-stringed tracks, or by choice)
+- ✅ Left-handed fretboard, note names, and a whole-neck note-name map
+- ✅ Recently opened songs, favourites and saved (offline) songs, in IndexedDB
+- ✅ Several songs open at once in tabs, restored on reload
+- ✅ Export audio (WAV) via alphaTab's audio exporter, with the mixer applied; exports the loop when looping
 
-## v0.4: Editing (the big one)
+## v0.4: Editing
 
-Guitar Pro is an editor. alphaTab is a renderer/player, so editing needs our own model layer on top of it.
+Guitar Pro is an editor. alphaTab is a renderer/player, so `public/editor.js` edits a copy of alphaTab's score model and the app rebuilds it through alphaTab's JSON form (which recomputes indexes, ties and timing) before re-rendering.
 
-- ⬜ Select a note/beat; keyboard entry of fret numbers on a string
-- ⬜ Change durations, dots, tuplets; insert/delete beats and bars
-- ⬜ Toggle techniques (bend, slide, HO/PO, PM, vibrato, harmonics…)
-- ⬜ Edit time/key signature, tempo, sections, repeats
-- ⬜ Add/remove tracks, change instrument and tuning
-- ⬜ Undo / redo
-- ⬜ Copy / paste bars
-- ⬜ Save edits back to `.gp`
+- ✅ Select a note/beat (click or arrow keys); keyboard entry of fret numbers on a string
+- ✅ Change durations, dots, triplets; insert/delete beats and bars
+- ✅ Toggle techniques (bend, slide, HO/PO, PM, vibrato, harmonics, let ring, dead/ghost notes, accent, staccato, ties)
+- ✅ Edit time/key signature, tempo, sections, repeats
+- ✅ Add/remove tracks, rename, change instrument (sound) and tuning
+- ✅ Undo / redo (bar snapshots for note edits, whole-score snapshots for structural edits)
+- ✅ Copy / paste bars
+- ✅ Save edits back to `.gp`
+- ⬜ Edit a second voice, and pitch entry for non-tab tracks (piano, vocals) and drums
+- ⬜ Multi-bar selection for copy / paste / delete; other tuplets (5, 6, 7…); custom bends and slides in/out
+- ⬜ Alternate endings and Da Capo / Coda directions
+- ⬜ Keep unsaved edits across a page reload
 
-## v0.5: Packaging
+## v0.5: Packaging (current)
 
-- ⬜ Desktop app (Electron or Tauri) with native file associations for `.gp*`
-- ⬜ Installable PWA with offline cache of opened songs
+- ✅ Desktop app (Electron, Windows installer) with the server built in and file associations for `.gp*`, MusicXML
+- ✅ Installable PWA: offline cache of the app, player, soundfonts and opened songs; opens files from the OS
+- ⬜ Code-signed installer and auto-update
+- ⬜ macOS and Linux desktop builds
 - ✅ Better soundfont option (larger GM bank, downloadable)
 - ✅ Per-track instrument override
-- ⬜ CI: run unit, converter and e2e tests on GitHub Actions
-- ⬜ YouTube audio for files opened locally (custom video URL + manual sync)
+- ✅ CI: unit tests on GitHub Actions for every push; converter and e2e tests as a non-blocking job (they need Songsterr and YouTube)
+- ✅ YouTube audio for any song, including opened files (custom video link, "Song starts now" sync, nudge)
+- ⬜ Per-bar manual sync for recordings that drift from the tab's tempo (tap along to set bar times)
 
 ## Known limitations
 
