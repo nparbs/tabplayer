@@ -193,6 +193,10 @@ body.no-fretboard .resizer-y { display: none; }
 .swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--text); }
 .small-note { font-size: 11px; margin: 6px 0 0; }
 .track-sound { margin-top: 4px; }
+.tracks-head { display: flex; align-items: center; justify-content: space-between; }
+.tracks-head button { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.tracks-head button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+body:not(.modify-tracks) .track-sound, body:not(.modify-tracks) .track-pitch, body:not(.modify-tracks) .track-mod { display: none; }
 .track-sound select { width: 100%; font-size: 11px; padding: 1px 4px; }
 .track-sound select.changed { border-color: var(--accent); }
 .small-btn { width: 100%; margin-top: 8px; font-size: 12px; }

@@ -337,6 +337,28 @@ try {
     await page.screenshot({ path: path.join(shotDir, 'reopened.png') });
   });
 
+  await step('track modifications hidden until "Modify" is on, and remembered', async () => {
+    const shown = () => page.evaluate(() => ({
+      pitch: getComputedStyle(document.querySelector('.track .track-pitch')).display !== 'none',
+      sound: getComputedStyle(document.querySelector('.track .track-sound')).display !== 'none',
+      song: getComputedStyle(document.getElementById('song-transpose').closest('label')).display !== 'none',
+      mixer: getComputedStyle(document.querySelector('.track .track-controls')).display !== 'none',
+    }));
+    let s = await shown();
+    if (s.pitch || s.sound || s.song || !s.mixer) throw new Error(`default ${JSON.stringify(s)}`);
+    await page.click('#modify-tracks');
+    s = await shown();
+    if (!s.pitch || !s.sound || !s.song) throw new Error(`after Modify ${JSON.stringify(s)}`);
+    if (await page.evaluate(() => localStorage.getItem('tabplayer.modifyTracks')) !== '1') throw new Error('not remembered');
+    // a hidden change still shows on the card
+    await page.click('#modify-tracks');
+    const i = await page.$eval('.track .capo', el => Number(el.closest('.track').dataset.index));
+    await page.select(`.track[data-index="${i}"] .transpose`, '3');
+    const sub = await page.$eval(`.track[data-index="${i}"] .track-sub`, e => e.textContent);
+    if (!sub.includes('Transposed +3')) throw new Error(`summary "${sub}"`);
+    await page.select(`.track[data-index="${i}"] .transpose`, '0');
+  });
+
   await step('transpose and capo per track and for the whole song', async () => {
     const i = await page.$eval('.track .capo', el => Number(el.closest('.track').dataset.index)); // a guitar or bass track
     const pitch = () => page.evaluate(i => {

@@ -71,7 +71,9 @@
           <select id="revision" title="Load an older Songsterr revision"></select>
         </label>
       </div>
-      <h3>Tracks</h3>
+      <h3 class="tracks-head">Tracks
+        <button id="modify-tracks" type="button" class="mini" aria-pressed="false" title="Show instrument sound, transpose and capo for each track">⚙ Modify</button>
+      </h3>
       <ul id="track-list" class="track-list"></ul>
       <div id="chords-section" class="hidden">
         <h3>Chords <span id="chords-count" class="muted"></span></h3>
@@ -173,7 +175,7 @@
           <option value="fluid">FluidR3 Mono: balanced (15 MB)</option>
         </select>
       </label>
-      <label class="row">Transpose song
+      <label class="row track-mod">Transpose song
         <select id="song-transpose" title="Shift every pitched track up or down (playback and notation)"></select>
       </label>
       <p class="muted small-note">Larger soundfonts download once, then load from the cache. Each track's instrument can be changed in its card above.</p>

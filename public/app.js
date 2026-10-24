@@ -23,7 +23,7 @@ const ui = {
   staveProfile: $('stave-profile'), layoutMode: $('layout-mode'), zoom: $('zoom'), theme: $('theme'),
   themeToggle: $('theme-toggle'), toggleSidebar: $('toggle-sidebar'),
   instrumentView: $('instrument-view'), noteLabels: $('note-labels'), allNotes: $('all-notes'), leftHanded: $('left-handed'),
-  cursorMode: $('cursor-mode'),
+  cursorMode: $('cursor-mode'), modifyTracks: $('modify-tracks'),
   multiTrack: $('multi-track'),
   overlay: $('overlay'), overlayText: $('overlay-text'), viewport: $('viewport'), welcome: $('welcome'),
   fretboard: $('fretboard'),
@@ -1112,11 +1112,17 @@ function trackIcon(track) {
   if (p >= 64 && p <= 79) return '🎷';
   return '🎵';
 }
-function trackDetails(track) {
+function trackDetails(track, { changes = true } = {}) {
   const staff = track.staves[0];
   if (staff.isPercussion) return 'Drums';
   const parts = [staff.tuningName || tuningName(at, staff.tuning) || `${staff.tuning.length} strings`];
   if (staff.capo) parts.push(`Capo ${staff.capo}`);
+  if (changes && track.playbackInfo) {
+    const shift = userTranspose(track);
+    if (shift) parts.push(`Transposed ${signed(shift)}`);
+    const orig = originalSound.get(track);
+    if (orig && orig.program !== track.playbackInfo.program) parts.push(gmName(track.playbackInfo.program));
+  }
   return parts.join(' · ');
 }
 function buildTrackList() {
@@ -1177,6 +1183,7 @@ function buildTrackList() {
       setTrackProgram(track, e.target.value === '' ? null : Number(e.target.value));
       e.target.classList.toggle('changed', e.target.value !== '');
       li.querySelector('.track-icon').textContent = trackIcon(track);
+      li.querySelector('.track-sub').textContent = trackDetails(track);
     });
     li.querySelector('.transpose')?.addEventListener('change', e => setTrackPitch([track], { transpose: Number(e.target.value) }));
     li.querySelector('.track-rename').addEventListener('change', e => editTrack(i, s => renameTrack(s, i, e.target.value), `Renamed to ${e.target.value.trim()}`));
@@ -1762,7 +1769,7 @@ function tuningOptions(staff) {
   const n = staff.tuning.length;
   const current = TUNINGS.findIndex(([, t]) => t.length === n && t.every((p, i) => p === staff.tuning[i]));
   const opts = TUNINGS.map(([name, t], i) => (t.length === n ? `<option value="${i}"${i === current ? ' selected' : ''}>${escapeHtml(name)}</option>` : '')).join('');
-  return current < 0 ? `<option value="" selected>${escapeHtml(trackDetails({ staves: [staff] }).split(' · ')[0])}</option>${opts}` : opts;
+  return current < 0 ? `<option value="" selected>${escapeHtml(trackDetails({ staves: [staff] }, { changes: false }).split(' · ')[0])}</option>${opts}` : opts;
 }
 
 function pushUndo(tab, entry) {
@@ -2696,6 +2703,15 @@ applyAppearance();
 ui.soundFont.value = sound.id;
 showTrainer();
 showMetro();
+// Instrument sound, transpose and capo stay out of the way unless "Modify" is on (remembered).
+function setModifyTracks(on) {
+  document.body.classList.toggle('modify-tracks', on);
+  ui.modifyTracks.classList.toggle('on', on);
+  ui.modifyTracks.setAttribute('aria-pressed', String(on));
+  store.set('modifyTracks', on ? '1' : '0');
+}
+setModifyTracks(store.get('modifyTracks') === '1');
+ui.modifyTracks.addEventListener('click', () => setModifyTracks(!document.body.classList.contains('modify-tracks')));
 ui.songTranspose.innerHTML = '<option value="mixed" disabled hidden>Mixed</option>' + transposeOptions();
 ui.songTranspose.value = '0';
 ui.songTranspose.addEventListener('change', () => {
