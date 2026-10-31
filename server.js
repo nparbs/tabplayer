@@ -7,6 +7,7 @@ import { parseSongsterrUrl, normalizeVideos, normalizeSearchResults } from './pu
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 5173;
+const HOST = process.env.HOST || '127.0.0.1'; // set HOST=0.0.0.0 to use it from other devices
 const UA = { 'User-Agent': 'Mozilla/5.0 (TabPlayer personal use)' };
 const API = 'https://www.songsterr.com/api';
 const CDN = 'https://dqsljvtekg760.cloudfront.net';
@@ -194,5 +195,5 @@ app.get('/api/songsterr/revisions', async (req, res) => {
 });
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  app.listen(PORT, () => console.log(`TabPlayer running at http://localhost:${PORT}`));
+  app.listen(PORT, HOST, () => console.log(`TabPlayer running at http://localhost:${PORT}`));
 }

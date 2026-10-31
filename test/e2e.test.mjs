@@ -617,6 +617,54 @@ try {
     await page.evaluate(() => { if (document.querySelector('#tabbar .tab.active .tab-dirty')) document.getElementById('export-gp').click(); });
   });
 
+  await step('unsaved edits come back after a reload, and are gone once saved', async () => {
+    const song = () => page.evaluate(() => ({
+      bars: window.tabPlayerApi.score.masterBars.length,
+      dirty: !!document.querySelector('#tabbar .tab.active .tab-dirty'),
+    }));
+    const loaded = () => page.waitForFunction(() => document.body.classList.contains('has-score')
+      && document.getElementById('overlay').classList.contains('hidden'), { timeout: 60000 });
+    const prompts = [];
+    const onDialog = d => prompts.push(d.type());
+    page.on('dialog', onDialog);
+    const original = await song();
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.keyboard.press('e');
+    await page.keyboard.down('Control'); await page.keyboard.press('Insert'); await page.keyboard.up('Control');
+    await page.waitForFunction(n => window.tabPlayerApi.score.masterBars.length === n, { timeout: 30000 }, original.bars + 1);
+    await new Promise(r => setTimeout(r, 1000)); // past the delay before the draft is written
+    await page.keyboard.press('Escape');
+
+    await page.reload({ waitUntil: 'networkidle0' });
+    await loaded();
+    let now = await song();
+    if (now.bars !== original.bars + 1 || !now.dirty) throw new Error(`after reload ${JSON.stringify(now)}, was ${JSON.stringify(original)}`);
+    if (prompts.includes('beforeunload')) throw new Error('asked before leaving although the edits were stored');
+
+    // closing an edited tab asks first; saying no keeps it
+    const tabCount = () => page.$$eval('#tabbar .tab', t => t.length);
+    const tabsBefore = await tabCount();
+    const asked = await page.evaluate(async () => {
+      const real = window.confirm, seen = [];
+      window.confirm = m => { seen.push(m); return false; };
+      document.querySelector('#tabbar .tab.active .tab-close').click();
+      await new Promise(r => setTimeout(r, 100));
+      window.confirm = real;
+      return seen;
+    });
+    if (!asked.some(p => /unsaved edits/.test(p)) || await tabCount() !== tabsBefore) throw new Error('closing an edited tab did not ask');
+
+    await page.click('#export-gp');
+    await page.waitForFunction(() => !document.querySelector('#tabbar .tab.active .tab-dirty'));
+    await new Promise(r => setTimeout(r, 300));
+    await page.reload({ waitUntil: 'networkidle0' });
+    await loaded();
+    now = await song();
+    // Earlier steps edited and saved this song too, so a clean reload can have fewer bars than `original`.
+    if (now.bars > original.bars || now.dirty) throw new Error(`after saving and reloading ${JSON.stringify(now)}, was ${JSON.stringify(original)}`);
+    page.off('dialog', onDialog);
+  });
+
   await step('tabs: several songs open at once, switch keeps each song', async () => {
     const info = () => page.evaluate(() => ({
       tabs: [...document.querySelectorAll('#tabbar .tab')].map(t => t.querySelector('.tab-title').textContent),

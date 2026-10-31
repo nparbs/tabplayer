@@ -10,7 +10,7 @@ import {
 } from '../public/songsterr.js';
 import { fetchSongsterr, fetchRevisions, searchSongs } from '../server.js';
 import { songKey, clampRange, normalizeTrainer, trainerSpeed, parseStored, withLoop } from '../public/practice.js';
-import { libraryLists, staleKeys, withSaved, canOpen, serializeTabs, parseTabs, Library, RECENT_LIMIT } from '../public/library.js';
+import { libraryLists, staleKeys, withSaved, canOpen, serializeTabs, parseTabs, draftKey, Library, RECENT_LIMIT } from '../public/library.js';
 
 const M = at.model;
 const note = (fret, string, extra = {}) => ({ fret, string, ...extra });
@@ -403,6 +403,19 @@ test('library: open tabs round-trip through storage; empty and malformed tabs ar
   assert.equal(back.tabs[0].tick, 960);
   assert.deepEqual(parseTabs('not json'), { tabs: [], active: 0 });
   assert.deepEqual(parseTabs(JSON.stringify({ tabs: [{ key: 'x', kind: 'songsterr' }, null], active: 4 })), { tabs: [], active: 0 });
+});
+
+test('library: an edited tab is remembered, with one draft per song and revision', () => {
+  const tabs = [
+    { id: 1, key: 'songsterr:269', kind: 'songsterr', input: '269', dirty: true },
+    { id: 2, key: 'file:a|b', kind: 'file' },
+  ];
+  const back = parseTabs(JSON.stringify(serializeTabs(tabs, 1)));
+  assert.equal(back.tabs[0].dirty, true);
+  assert.equal(back.tabs[1].dirty, null);
+  assert.equal(draftKey({ key: 'songsterr:269', rev: null }), 'songsterr:269|');
+  assert.equal(draftKey(back.tabs[0]), draftKey(tabs[0]));
+  assert.notEqual(draftKey({ key: 'songsterr:269', rev: 5 }), draftKey({ key: 'songsterr:269', rev: 6 }));
 });
 
 test('library: works from memory when IndexedDB is unavailable', async () => {

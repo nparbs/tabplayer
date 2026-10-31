@@ -58,7 +58,7 @@ Guitar Pro is an editor. alphaTab is a renderer/player, so `public/editor.js` ed
 - ⬜ Edit a second voice, and pitch entry for non-tab tracks (piano, vocals) and drums
 - ⬜ Multi-bar selection for copy / paste / delete; other tuplets (5, 6, 7…); custom bends and slides in/out
 - ⬜ Alternate endings and Da Capo / Coda directions
-- ⬜ Keep unsaved edits across a page reload
+- ✅ Keep unsaved edits across a page reload
 
 ## v0.5: Packaging (current)
 
@@ -72,8 +72,16 @@ Guitar Pro is an editor. alphaTab is a renderer/player, so `public/editor.js` ed
 - ✅ YouTube audio for any song, including opened files (custom video link, "Song starts now" sync, nudge)
 - ⬜ Per-bar manual sync for recordings that drift from the tab's tempo (tap along to set bar times)
 
+## Fixes (found in review, 2026-10-31)
+
+- ✅ Closing a tab with unsaved edits now asks first
+- ✅ A second tab of the same song no longer picks up the first tab's unsaved edits after a reload
+- ✅ The dev server only listens on this computer unless `HOST` is set (the desktop app already did)
+- ⬜ Two edited tabs of the same song share one draft, so after a reload both show whichever was edited last
+- ⬜ Two browser test steps fail now and then, once each so far, cause not found: the hammer-on hint, and "switch to a larger soundfont" (a 20 s timeout, followed by an `AudioScheduledSourceNode` stop error)
+- ⬜ Browser tests need Songsterr and YouTube to be reachable. Add recorded fixtures so they can run offline.
+
 ## Known limitations
 
 - Songsterr's API is undocumented. Format changes may break import; the converter test will catch this.
 - Lyrics are intentionally not imported.
-- No editing yet (see v0.4).

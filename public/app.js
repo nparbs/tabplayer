@@ -1,7 +1,7 @@
 import { songsterrToScore, parseSongsterrUrl, tuningName, looksLikeSongsterrLink, songsterrUrl } from './songsterr.js';
 import { YouTubeAudio, parseYouTubeId, barStartSeconds } from './youtube.js';
 import { songKey, clampRange, normalizeTrainer, trainerSpeed, parseStored, withLoop } from './practice.js';
-import { Library, libraryLists, staleKeys, withSaved, canOpen, serializeTabs, parseTabs } from './library.js';
+import { Library, libraryLists, staleKeys, withSaved, canOpen, serializeTabs, parseTabs, draftKey } from './library.js';
 import { chordShape, shapeFromChord, chordSvg } from './chords.js';
 import { Clicker, CLICK_SOUNDS, beatsFromBars, firstBeatFrom, countInPlan, encodeWav } from './audio.js';
 import {
@@ -70,6 +70,7 @@ const state = {
 //   songsterr, videos, selected, activeTrack, tick, mixer, loading, loadingText, error, restoring, closed }
 const tabs = { list: [], active: null, seq: 0 };
 const library = new Library();
+const drafts = new Library('tabplayer-drafts'); // unsaved edits, as alphaTab's JSON form of the score
 const lib = { records: new Map() }; // in-memory copy of the library, for drawing lists synchronously
 
 const store = {
@@ -417,14 +418,19 @@ function failLoad(tab, message) {
   renderTabs();
 }
 function finishLoad(tab, score, message) {
+  const edited = applyDraft(tab);
+  if (edited) message = 'Brought back your unsaved edits. Save .gp to keep them for good.';
+  else { dropDraft(tab); tab.dirty = false; }
+  const shown = edited ?? score;
   Object.assign(tab, {
-    score, loading: false, error: '', restoring: false,
+    score: shown, loading: false, error: '', restoring: false,
     title: score.title || tab.fileName || 'Untitled', artist: score.artist || '',
   });
   renderTabs();
   saveTabs();
   if (tab === activeTab()) { showTab(tab); setStatus(message); }
   rememberOpened(tab);
+  if (edited) tab.raw = null; // as after any edit: the fetched data no longer matches what is shown
 }
 
 async function fetchSongsterrData(input, revision) {
@@ -609,11 +615,57 @@ function showQueuedTab() {
 
 /** Opens a tab restored from the last visit, the first time it is shown. */
 async function loadTab(tab) {
+  tab.draft = tab.dirty ? await drafts.get(draftKey(tab)).catch(() => null) : null;
   if (tab.kind === 'songsterr') { loadSongsterr(tab.input, tab.rev, { tab }); return; }
   const record = await library.get(tab.key);
   if (tab.closed) return;
   if (canOpen(record)) loadBytes(tab, record.bytes, record.fileName || tab.title);
   else failLoad(tab, `${tab.title || 'This file'} is no longer in your library. Open the file again.`);
+}
+
+/** The score from a tab's stored draft, if it has one, with its view fitted to that score. */
+function applyDraft(tab) {
+  const draft = tab.draft;
+  tab.draft = null;
+  if (!draft) return null;
+  try {
+    const score = fromJs(draft.js);
+    tab.selected = tab.selected?.filter(i => score.tracks[i]);
+    if (!tab.selected?.length) tab.selected = [0];
+    if (!score.tracks[tab.activeTrack]) tab.activeTrack = tab.selected[0];
+    tab.dirty = true;
+    tab.draftSaved = true;
+    tab.draftKey = draft.key;
+    return score;
+  } catch (e) {
+    console.warn('draft', e);
+    return null;
+  }
+}
+
+/** Keeps a tab's edits across a reload. Written a moment after the last edit, as these can be big. */
+function saveDraft(tab) {
+  tab.draftSaved = false;
+  clearTimeout(tab.draftTimer);
+  tab.draftTimer = setTimeout(async () => {
+    if (tab.closed || !tab.dirty || !tab.key) return;
+    const score = tab.score, key = draftKey(tab);
+    try {
+      await drafts.put({ key, js: toJs(score), savedAt: Date.now() });
+      tab.draftKey = key;
+      // Only safe to leave without asking if this is what's on screen and it really reached storage.
+      tab.draftSaved = tab.score === score && !!(await drafts.db);
+    } catch (e) {
+      console.warn('draft', e);
+    }
+  }, 400);
+}
+
+function dropDraft(tab) {
+  clearTimeout(tab.draftTimer);
+  if (tab.draftKey) drafts.delete(tab.draftKey).catch(e => console.warn('draft', e));
+  tab.draftKey = null;
+  tab.draftSaved = false;
 }
 
 function showEmpty(tab) {
@@ -642,7 +694,9 @@ function showEmpty(tab) {
 function closeTab(tab) {
   const i = tabs.list.indexOf(tab);
   if (i < 0) return;
+  if (tab.dirty && !confirm(`Close ${tab.title || 'this tab'} and lose your unsaved edits?`)) return;
   tab.closed = true;
+  dropDraft(tab);
   tabs.list.splice(i, 1);
   if (tabs.active === tab.id) {
     tabs.active = null;
@@ -719,9 +773,10 @@ async function updateRecord(key, change) {
 /** Adds the tab's song to Recent (and refreshes a saved Songsterr copy with what was just fetched). */
 async function rememberOpened(tab) {
   if (!tab.key) return;
+  const raw = tab.raw;
   try {
     const old = (await library.get(tab.key)) || {};
-    const fresh = tab.kind === 'songsterr' && old.saved && !tab.rev ? tab.raw : old.data;
+    const fresh = tab.kind === 'songsterr' && old.saved && !tab.rev ? raw : old.data;
     await library.put({
       ...old, key: tab.key, kind: tab.kind, title: tab.title, artist: tab.artist,
       input: tab.input ?? undefined, rev: tab.rev ?? undefined, fileName: tab.fileName ?? undefined,
@@ -1732,7 +1787,7 @@ function setEditMode(on) {
   } else {
     editCursor.remove();
     editString.remove();
-    setStatus(tab?.dirty ? 'Edits kept in this tab. Save .gp to keep them for good.' : 'Stopped editing.');
+    setStatus(tab?.dirty ? 'Edits kept in this tab, even if you reload. Save .gp to keep them for good.' : 'Stopped editing.');
   }
   relayout();
   updateEditUi();
@@ -1825,6 +1880,8 @@ function commitEdit(tab, score, sel, tracks = null) {
   tab.score = score;
   tab.raw = null; // the fetched Songsterr data no longer matches what is shown
   tab.dirty = true;
+  saveDraft(tab);
+  saveTabs(); // so a crash still finds the draft: only tabs marked as edited look for one
   edit.sel = clampSelection(score, sel);
   edit.digit = edit.digit && { ...edit.digit, sel: edit.sel };
   renderTabs();
@@ -2141,7 +2198,7 @@ for (const el of [ui.editTempo, ui.editTsNum, ui.editSection]) {
 // Clicks in the score pick the note to edit (alphaTab still moves the playhead there).
 $('alphaTab').addEventListener('mousedown', e => { if (edit.on && e.button === 0) selectAt(e.clientX, e.clientY); });
 window.addEventListener('beforeunload', e => {
-  if (tabs.list.some(t => t.dirty)) { e.preventDefault(); e.returnValue = ''; }
+  if (tabs.list.some(t => t.dirty && !t.draftSaved)) { e.preventDefault(); e.returnValue = ''; }
 });
 
 // ---------- fretboard ----------
@@ -2572,7 +2629,7 @@ ui.exportGp.addEventListener('click', () => {
     finally { applyNotation(api.score, ui.staveProfile.value); }
     download(bytes, `${safeName()}.gp`, 'application/octet-stream');
     const tab = activeTab();
-    if (tab?.dirty) { tab.dirty = false; renderTabs(); setStatus(`Saved your edits as ${safeName()}.gp`); }
+    if (tab?.dirty) { tab.dirty = false; dropDraft(tab); renderTabs(); setStatus(`Saved your edits as ${safeName()}.gp`); }
   } catch (e) { setStatus(`Export failed: ${e.message}`, true); }
 });
 ui.exportMidi.addEventListener('click', () => api.downloadMidi());
@@ -2764,7 +2821,7 @@ if ('launchQueue' in window) {
 // Reopen last visit's tabs. Only the active one loads now; the rest load when picked.
 window.addEventListener('pagehide', () => { stashTab(activeTab()); saveTabs(); });
 const restored = parseTabs(store.get('tabs'));
-for (const t of restored.tabs) newTab({ ...t, restoring: true });
+for (const t of restored.tabs) newTab({ ...t, restoring: true, draftSaved: !!t.dirty, draftKey: t.dirty ? draftKey(t) : null });
 const params = new URLSearchParams(location.search);
 const initial = params.get('url');
 const initialKey = initial && parseSongsterrUrl(initial) && songKey({ songId: parseSongsterrUrl(initial).songId });

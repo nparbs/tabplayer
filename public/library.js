@@ -35,7 +35,10 @@ export function canOpen(record) {
   return record?.kind === 'songsterr' ? !!record.input : record?.kind === 'file' && !!record.bytes?.length;
 }
 
-const TAB_FIELDS = ['key', 'kind', 'input', 'rev', 'title', 'artist', 'selected', 'activeTrack', 'tick'];
+const TAB_FIELDS = ['key', 'kind', 'input', 'rev', 'title', 'artist', 'selected', 'activeTrack', 'tick', 'dirty'];
+
+/** Where a tab's unsaved edits are kept: one draft per song and revision. */
+export const draftKey = tab => `${tab.key}|${tab.rev ?? ''}`;
 
 /** Open tabs as stored in localStorage (empty tabs are left out). */
 export function serializeTabs(tabs, activeId) {

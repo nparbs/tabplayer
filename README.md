@@ -12,6 +12,8 @@ npm start
 # open http://localhost:5173
 ```
 
+The server only listens on this computer. To use it from a phone or another PC, start it with `HOST=0.0.0.0`.
+
 Requires Node.js 22+.
 
 ### Desktop app (Windows)
@@ -33,7 +35,7 @@ Open TabPlayer in Chrome or Edge and click **⬇ Install** in the top bar (or th
 - **Songsterr import**: paste a song URL (`https://www.songsterr.com/a/wsa/...-tab-s269t2`) or just the song id. All tracks are imported, and the track in the URL (`t2`) is selected. Pick an older revision from the sidebar.
 - **Your own YouTube video**: pick *Audio → Your own YouTube video…*, paste any link (works for opened files too), play it and press **⏱ Song starts now** when the first bar begins. The tab follows using its own tempo; use −/+ to fine-tune. Remembered per song. Best with recordings that keep the tab's tempo, such as lessons and backing tracks.
 - **YouTube audio**: for Songsterr songs with synced videos, choose *Audio → YouTube: Original recording* in the bottom bar. The video plays as the audio and the cursor follows it bar by bar (using Songsterr's sync points). Alternative videos, backing tracks and isolated tracks are listed too. Use −/+ in the video panel to nudge the sync. Speed snaps to YouTube's rates; the metronome, count-in and mixer only apply to the synth.
-- **Tabs**: keep several songs open at once in tabs above the score. A song you open from search, a link or a file goes into a new tab (or the current one if it is empty). Each tab keeps its own tracks, position and mixer. Middle-click or × closes a tab, `[` / `]` switch tabs. Open tabs come back when you reload the page; only the one you are looking at is loaded straight away.
+- **Tabs**: keep several songs open at once in tabs above the score. A song you open from search, a link or a file goes into a new tab (or the current one if it is empty). Each tab keeps its own tracks, position and mixer. Middle-click or × closes a tab, `[` / `]` switch tabs. Open tabs come back when you reload the page; only the one you are looking at is loaded straight away. Unsaved edits come back too, until you save the `.gp` or close the tab.
 - **Library**: the 📚 *Library* menu (or `B`) lists **Favourites** (star a song with ☆ in the sidebar or `F`), **Saved** songs and **Recent** songs (the last 30). **Save** keeps a copy of the song in the browser (IndexedDB), so it opens without an internet connection, and is used automatically if Songsterr can't be reached. Opened files are kept too, so they can be reopened from the library. Favourites and recent songs are also shown on the welcome screen.
 - **Editing**: press **✏️ Edit** (or `E`) to edit the tab, Guitar Pro style. Click a note (or move with the arrow keys) and type fret numbers; change note lengths, dots and triplets; add techniques (hammer-on/pull-off, slide, bend, vibrato, palm mute, let ring, dead and ghost notes, accent, staccato, natural harmonic, tie); insert and delete beats and bars; copy and paste bars; set tempo, time signature, key signature, repeats and section markers per bar; add guitar or bass tracks, rename and retune tracks, or remove them. Undo / redo covers everything. Edited tabs show a dot; **Save .gp** (Ctrl+S) saves the result as a Guitar Pro file.
 - **Open files**: `.gp`, `.gpx`, `.gp3`–`.gp5`, MusicXML, Capella, alphaTex (button or drag & drop).
