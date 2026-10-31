@@ -78,7 +78,8 @@ Guitar Pro is an editor. alphaTab is a renderer/player, so `public/editor.js` ed
 - ✅ A second tab of the same song no longer picks up the first tab's unsaved edits after a reload
 - ✅ The dev server only listens on this computer unless `HOST` is set (the desktop app already did)
 - ⬜ Two edited tabs of the same song share one draft, so after a reload both show whichever was edited last
-- ⬜ Two browser test steps fail now and then, once each so far, cause not found: the hammer-on hint, and "switch to a larger soundfont" (a 20 s timeout, followed by an `AudioScheduledSourceNode` stop error)
+- ⬜ Three browser test steps fail now and then, cause not found: the hammer-on hint (once locally, and on 2 of the last 3 `main` runs in CI), "switch to a larger soundfont" (once locally, a 20 s timeout followed by an `AudioScheduledSourceNode` stop error), and "open exported .gp file" (once in CI, a 30 s timeout, passed on re-run)
+- ⬜ The "YouTube audio plays in sync" browser test fails on every recent CI run because the video's owner no longer allows embedding. Switch it to a video that does.
 - ⬜ Browser tests need Songsterr and YouTube to be reachable. Add recorded fixtures so they can run offline.
 
 ## Known limitations
