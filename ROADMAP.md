@@ -82,7 +82,16 @@ Guitar Pro is an editor. alphaTab is a renderer/player, so `public/editor.js` ed
 - ⬜ The "YouTube audio plays in sync" browser test fails on every recent CI run because the video's owner no longer allows embedding. Switch it to a video that does.
 - ⬜ Browser tests need Songsterr and YouTube to be reachable. Add recorded fixtures so they can run offline.
 
+## Bookmarklet import (when Songsterr blocks the server)
+
+- ✅ Songsterr sometimes 403s this server's requests but never a normal browser. The welcome screen
+  offers a "Send to TabPlayer" bookmarklet: run on a Songsterr song page, it reads the tab JSON in
+  the user's own session and POSTs it to `/api/convert`, which builds a `.gp`, saves it under
+  `cache/converted/`, and the app opens it with `?gp=<songId-revisionId>`. No header spoofing.
+
 ## Known limitations
 
 - Songsterr's API is undocumented. Format changes may break import; the converter test will catch this.
+- A bookmarklet-imported song opens as a plain `.gp` file, so it has no revision picker or YouTube
+  sync (those still need the direct Songsterr fetch).
 - Lyrics are intentionally not imported.

@@ -443,6 +443,24 @@ async function fetchSongsterrData(input, revision) {
 }
 
 /**
+ * Builds a Songsterr song into a real Guitar Pro 7 file, then loads that file back.
+ * The returned `score` is the re-imported `.gp` (not the directly built model), so what the
+ * app shows, plays and edits is byte-for-byte what "Export .gp" produces — one pipeline, no
+ * divergence. `bytes` is that `.gp` file. If the round trip fails for some song, we fall back
+ * to the directly built score so the song still opens (no worse than before this change).
+ */
+function songsterrToGp(meta, tracks) {
+  const built = songsterrToScore(at, meta, tracks);
+  try {
+    const bytes = new at.exporter.Gp7Exporter().export(built, api.settings);
+    return { score: at.importer.ScoreLoader.loadScoreFromBytes(bytes, api.settings), bytes };
+  } catch (e) {
+    console.warn('Songsterr .gp round trip failed; using the built score directly.', e);
+    return { score: built, bytes: null };
+  }
+}
+
+/**
  * Loads a Songsterr song into a tab (a new one unless the current tab is empty).
  * Uses the saved offline copy when asked to, or when Songsterr cannot be reached.
  */
@@ -468,14 +486,14 @@ async function loadSongsterr(input, revision = null, { tab = targetTab(), useSav
     }
     if (tab.closed) return;
     if (tab === activeTab()) showOverlay('Converting tab…');
-    const score = songsterrToScore(at, data.meta, data.tracks);
+    const { score, bytes } = songsterrToGp(data.meta, data.tracks);
     let track = parsed.trackIndex ?? data.trackIndex ?? data.meta.popularTrack ?? data.meta.defaultTrack ?? 0;
     if (!score.tracks[track]) track = 0;
     const latestRevisionId = data.meta.latestRevisionId ?? data.meta.revisionId;
     const isLatest = !revision || data.meta.revisionId === latestRevisionId;
     keepView(tab, score, [track]);
     Object.assign(tab, {
-      kind: 'songsterr', key, input, rev: isLatest ? null : data.meta.revisionId, raw: data, bytes: null,
+      kind: 'songsterr', key, input, rev: isLatest ? null : data.meta.revisionId, raw: data, bytes,
       songsterr: { input, songId: data.meta.songId, revisionId: data.meta.revisionId, latestRevisionId },
       videos: data.videos || [],
     });
@@ -491,6 +509,22 @@ async function loadSongsterr(input, revision = null, { tab = targetTab(), useSav
 async function loadFile(file, tab = targetTab()) {
   beginLoad(tab, `Opening ${file.name}…`);
   loadBytes(tab, new Uint8Array(await file.arrayBuffer()), file.name);
+}
+
+/** Loads a .gp the server made from the Songsterr bookmarklet (opened via ?gp=<id>). */
+async function loadConvertedGp(id, tab = targetTab()) {
+  beginLoad(tab, 'Loading the converted Songsterr tab…');
+  try {
+    const res = await fetch(`/api/gp/${encodeURIComponent(id)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    if (tab.closed) return;
+    loadBytes(tab, new Uint8Array(await res.arrayBuffer()), `${id}.gp`);
+  } catch (e) {
+    failLoad(tab, `Could not load the converted tab: ${e.message}`);
+  }
 }
 
 function loadBytes(tab, bytes, fileName) {
@@ -1879,6 +1913,7 @@ function commitEdit(tab, score, sel, tracks = null) {
   remapTabTracks(tab, score, tracks);
   tab.score = score;
   tab.raw = null; // the fetched Songsterr data no longer matches what is shown
+  tab.bytes = null; // and neither does the .gp we loaded it from
   tab.dirty = true;
   saveDraft(tab);
   saveTabs(); // so a crash still finds the draft: only tabs marked as edited look for one
@@ -2623,12 +2658,18 @@ ui.revision.addEventListener('change', () => {
 
 ui.exportGp.addEventListener('click', () => {
   try {
-    applyNotation(api.score, 'Default'); // export the song's own notation flags, not the current view
-    let bytes;
-    try { bytes = new at.exporter.Gp7Exporter().export(api.score, api.settings); }
-    finally { applyNotation(api.score, ui.staveProfile.value); }
-    download(bytes, `${safeName()}.gp`, 'application/octet-stream');
     const tab = activeTab();
+    let bytes;
+    // An unedited Songsterr tab already holds the exact .gp it was loaded from, so save that
+    // verbatim; otherwise (edited, or an opened file) export the current score.
+    if (tab?.kind === 'songsterr' && !tab.dirty && tab.bytes) {
+      bytes = tab.bytes;
+    } else {
+      applyNotation(api.score, 'Default'); // export the song's own notation flags, not the current view
+      try { bytes = new at.exporter.Gp7Exporter().export(api.score, api.settings); }
+      finally { applyNotation(api.score, ui.staveProfile.value); }
+    }
+    download(bytes, `${safeName()}.gp`, 'application/octet-stream');
     if (tab?.dirty) { tab.dirty = false; dropDraft(tab); renderTabs(); setStatus(`Saved your edits as ${safeName()}.gp`); }
   } catch (e) { setStatus(`Export failed: ${e.message}`, true); }
 });
@@ -2818,17 +2859,54 @@ if ('launchQueue' in window) {
   });
 }
 
+/**
+ * The "Send to TabPlayer" bookmarklet. It runs on a songsterr.com song page (the user's own
+ * session), reads the tab JSON the Songsterr player uses, POSTs it to this app's /api/convert,
+ * and opens the resulting .gp here. The app's own origin is baked in so it works on any port.
+ */
+function buildBookmarklet(origin) {
+  const code = `(async()=>{try{
+    var m=location.pathname.match(/-s(\\d+)/)||location.search.match(/[?&]id=(\\d+)/);
+    if(!m){alert('Open a Songsterr song page first, then click this bookmark.');return;}
+    var meta=await (await fetch('/api/meta/'+m[1])).json();
+    var base='https://dqsljvtekg760.cloudfront.net/'+meta.songId+'/'+meta.revisionId+'/'+meta.image+'/';
+    var tracks=await Promise.all(meta.tracks.map(function(_,i){return fetch(base+i+'.json').then(function(r){return r.json();});}));
+    var res=await fetch(${JSON.stringify(origin)}+'/api/convert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({meta:meta,tracks:tracks})});
+    var out=await res.json();
+    if(!res.ok){alert('TabPlayer: '+(out.error||res.status));return;}
+    window.open(${JSON.stringify(origin)}+'/?gp='+out.id,'_blank');
+  }catch(e){alert('TabPlayer import failed: '+e.message);}})();void 0;`;
+  return 'javascript:' + encodeURIComponent(code.replace(/\s*\n\s*/g, ''));
+}
+{
+  const link = document.getElementById('bookmarklet');
+  if (link) {
+    link.href = buildBookmarklet(location.origin);
+    // Clicking it on this page would just run it here (no Songsterr data), so block that and hint.
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      setStatus('Drag "Send to TabPlayer" to your bookmarks bar, then click it on a Songsterr song page.');
+    });
+  }
+}
+
 // Reopen last visit's tabs. Only the active one loads now; the rest load when picked.
 window.addEventListener('pagehide', () => { stashTab(activeTab()); saveTabs(); });
 const restored = parseTabs(store.get('tabs'));
 for (const t of restored.tabs) newTab({ ...t, restoring: true, draftSaved: !!t.dirty, draftKey: t.dirty ? draftKey(t) : null });
 const params = new URLSearchParams(location.search);
+const gpId = params.get('gp');
 const initial = params.get('url');
 const initialKey = initial && parseSongsterrUrl(initial) && songKey({ songId: parseSongsterrUrl(initial).songId });
 const linked = initialKey && tabs.list.find(t => t.key === initialKey && String(t.rev ?? '') === (params.get('rev') ?? ''));
 renderTabs();
 refreshLibrary();
-if (initial && !linked) {
+if (gpId && /^\d+-\d+$/.test(gpId)) {
+  setUrlParams({ gp: null }); // so a reload doesn't try to reload a converted tab that may be gone
+  const tab = newTab();
+  activateTab(tab);
+  loadConvertedGp(gpId, tab);
+} else if (initial && !linked) {
   ui.url.value = initial;
   const tab = newTab();
   activateTab(tab);

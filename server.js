@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { parseSongsterrUrl, normalizeVideos, normalizeSearchResults } from './public/songsterr.js';
+import * as alphaTab from '@coderline/alphatab';
+import { parseSongsterrUrl, normalizeVideos, normalizeSearchResults, songsterrToScore } from './public/songsterr.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 5173;
@@ -121,6 +122,43 @@ export const SOUNDFONTS = {
   musescore: { file: 'MuseScore_General.sf3', url: 'https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General/MuseScore_General.sf3' },
   fluid: { file: 'FluidR3Mono_GM.sf3', url: 'https://github.com/musescore/MuseScore/raw/2.3.2/share/sound/FluidR3Mono_GM.sf3' },
 };
+// Songsterr sometimes blocks this server's requests, but never a real browser. The bookmarklet
+// (served on the welcome screen) reads the tab JSON in the user's own Songsterr session and POSTs
+// it here; we convert it to a Guitar Pro 7 file, save it, and the app loads it with ?gp=<id>.
+const CONVERTED_DIR = process.env.TABPLAYER_CONVERTED_DIR || path.join(__dirname, 'cache', 'converted');
+
+/** Builds the Songsterr song into a .gp file on disk and returns how to load it. */
+export function convertSongsterr(meta, tracks) {
+  if (!meta || typeof meta !== 'object') throw fail('No song meta data was sent.', 400);
+  if (!Array.isArray(tracks) || !tracks.length) throw fail('No track data was sent.', 400);
+  const id = `${Number(meta.songId) || 0}-${Number(meta.revisionId) || 0}`;
+  if (!/^\d+-\d+$/.test(id) || id.startsWith('0-')) throw fail('The song is missing a Songsterr id.', 400);
+  let bytes;
+  try {
+    const score = songsterrToScore(alphaTab, meta, tracks);
+    bytes = new alphaTab.exporter.Gp7Exporter().export(score, new alphaTab.Settings());
+  } catch (e) {
+    throw fail(`Could not convert this tab to a .gp file: ${e.message}`, 422);
+  }
+  fs.mkdirSync(CONVERTED_DIR, { recursive: true });
+  fs.writeFileSync(path.join(CONVERTED_DIR, `${id}.gp`), Buffer.from(bytes));
+  return { id, title: meta.title || '', artist: meta.artist || '', bytes: bytes.length };
+}
+
+// The bookmarklet runs on https://www.songsterr.com and calls this local server cross-origin.
+// Allow just that origin, and answer the Private Network Access preflight Chrome sends for a
+// public page reaching localhost.
+function allowBookmarklet(req, res) {
+  const origin = req.headers.origin;
+  if (origin && /^https:\/\/(www\.)?songsterr\.com$/.test(origin)) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Vary', 'Origin');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Private-Network', 'true');
+  }
+}
+
 const SOUNDFONT_DIR = process.env.TABPLAYER_SOUNDFONT_DIR || path.join(__dirname, 'cache', 'soundfonts');
 const downloading = new Set();
 
@@ -192,6 +230,26 @@ app.get('/api/songsterr/revisions', async (req, res) => {
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
+});
+
+// The bookmarklet sends the tab JSON it read from the user's Songsterr session; we save a .gp.
+app.options('/api/convert', (req, res) => { allowBookmarklet(req, res); res.sendStatus(204); });
+app.post('/api/convert', express.json({ limit: '50mb' }), (req, res) => {
+  allowBookmarklet(req, res);
+  try {
+    const { meta, tracks } = req.body || {};
+    res.json(convertSongsterr(meta, tracks));
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Serves a converted .gp back to the app (loaded with ?gp=<id>). The id is songId-revisionId.
+app.get('/api/gp/:id', (req, res) => {
+  if (!/^\d+-\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Bad id' });
+  const file = path.join(CONVERTED_DIR, `${req.params.id}.gp`);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: 'That converted tab is gone. Run the Songsterr bookmarklet again.' });
+  res.type('application/octet-stream').sendFile(file);
 });
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
